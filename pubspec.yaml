@@ -1,0 +1,24 @@
+name: faqih_downloader_mobile
+description: "Faqih Downloader (FD) - Mobile Android Port"
+publish_to: 'none'
+version: 2.0.2+1
+
+environment:
+  sdk: ^3.10.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  shared_preferences: ^2.3.4
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
