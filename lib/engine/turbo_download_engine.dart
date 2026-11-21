@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:path/path.dart' as p;
-
 import '../core/config/app_constants.dart';
 import '../core/models/download_chunk.dart';
 import '../core/models/download_status.dart';
@@ -11,6 +9,7 @@ import 'chunk_persistence.dart';
 import 'chunk_worker.dart';
 import 'dynamic_splitter.dart';
 import 'engine_callbacks.dart';
+import 'engine_initializer.dart';
 import 'file_assembler.dart';
 import 'server_prober.dart';
 import 'speed_tracker.dart';
@@ -49,6 +48,7 @@ class TurboDownloadEngine {
   final SpeedTracker _speedTracker = SpeedTracker();
   final ChunkPersistence _persistence = const ChunkPersistence();
   final DynamicSplitter _splitter = const DynamicSplitter();
+  final EngineInitializer _initializer = const EngineInitializer();
   final FileAssembler _assembler = const FileAssembler();
   final ChunkWorker _worker = ChunkWorker();
 
@@ -68,6 +68,7 @@ class TurboDownloadEngine {
   bool _fatalLinkExpired = false;
   int? _fatalHttpStatus;
   Future<void>? _activeRunFuture;
+  Future<void> _saveQueue = Future<void>.value();
 
   DownloadStatus get status => _status;
   List<DownloadChunk> get chunks => List<DownloadChunk>.unmodifiable(_chunks);
@@ -89,6 +90,14 @@ class TurboDownloadEngine {
     );
   }
 
+  Future<void> _awaitActiveRun() async {
+    final active = _activeRunFuture;
+    if (active == null) return;
+    try {
+      await active;
+    } catch (_) {}
+  }
+
   Future<void> start() {
     if (_activeRunFuture != null) return _activeRunFuture!;
     final future = _runInternal().whenComplete(() {
@@ -102,16 +111,12 @@ class TurboDownloadEngine {
     if (_status == DownloadStatus.completed || _isCancelled) return;
     _isPaused = true;
     _abortAllWorkers();
-    if (_activeRunFuture != null) {
-      try {
-        await _activeRunFuture;
-      } catch (_) {}
-      return;
-    }
+    if (_activeRunFuture != null) return await _awaitActiveRun();
     await _finalizePaused();
   }
 
   Future<void> resume() async {
+    await _awaitActiveRun();
     if (_status == DownloadStatus.completed || _isCancelled) return;
     _isPaused = false;
     await start();
@@ -122,12 +127,7 @@ class TurboDownloadEngine {
     _isCancelled = true;
     _isPaused = false;
     _abortAllWorkers();
-    if (_activeRunFuture != null) {
-      try {
-        await _activeRunFuture;
-      } catch (_) {}
-      return;
-    }
+    if (_activeRunFuture != null) return await _awaitActiveRun();
     await _finalizeCancelled();
   }
 
@@ -169,97 +169,56 @@ class TurboDownloadEngine {
 
       if (_isCancelled) return await _finalizeCancelled();
       if (_isPaused) return await _finalizePaused();
-      if (_fatalError != null) {
-        _speedTracker.pause();
-        await _saveCurrentState();
-        _status = DownloadStatus.failed;
-        _emitProgress();
-        callbacks?.onError?.call(
-          _fatalError!,
-          linkExpired: _fatalLinkExpired,
-          httpStatus: _fatalHttpStatus,
-        );
-        throw _fatalError!;
-      }
+      if (_fatalError != null) return await _handleFatalError();
 
       _status = DownloadStatus.merging;
       _emitProgress();
       final assembly = await _assembler.assemble(
-        destinationPath: destinationPath,
-        chunks: _chunks,
-        expectedTotalSize: _totalSize,
-        supportsRanges: _supportsRanges,
+        destinationPath: destinationPath, chunks: _chunks,
+        expectedTotalSize: _totalSize, supportsRanges: _supportsRanges,
         expectedSha256: expectedSha256,
       );
       _speedTracker.pause();
       if (_totalSize <= 0) _totalSize = assembly.totalBytes;
       _status = DownloadStatus.completed;
       _emitProgress();
-      callbacks?.onComplete?.call(
-        assembly.filePath,
-        assembly.totalBytes,
-        _speedTracker.elapsedActiveSeconds,
-      );
+      callbacks?.onComplete?.call(assembly.filePath, assembly.totalBytes, _speedTracker.elapsedActiveSeconds);
     } finally {
       progressTimer?.cancel();
       if (ownsClient) client.close(force: true);
     }
   }
 
-  Future<void> _prepareChunks(HttpClient client) async {
-    if (_chunks.isEmpty) {
-      final restored = await _persistence.loadState(destinationPath);
-      if (restored != null) {
-        _resolvedUrl = url.isNotEmpty ? url : restored.url;
-        _totalSize = restored.totalSize;
-        _supportsRanges = restored.supportsRanges;
-        _filename = restored.filename;
-        _initialElapsedSec = restored.accumulatedActiveSeconds;
-        _chunks..clear()..addAll(restored.chunks);
-        callbacks?.onLog?.call('Restored ${_chunks.length} chunk(s) from checkpoint.');
-        return;
-      }
-      await _probeAndInitChunks(client);
-    } else if (_resolvedUrl.isEmpty) {
-      _resolvedUrl = url;
-    }
+  Future<void> _handleFatalError() async {
+    _speedTracker.pause();
+    await _saveCurrentState();
+    _status = DownloadStatus.failed;
+    _emitProgress();
+    callbacks?.onError?.call(_fatalError!, linkExpired: _fatalLinkExpired, httpStatus: _fatalHttpStatus);
+    throw _fatalError!;
   }
 
-  Future<void> _probeAndInitChunks(HttpClient client) async {
-    _status = DownloadStatus.probing;
-    _emitProgress();
-    callbacks?.onLog?.call('Probing $url');
+  Future<void> _prepareChunks(HttpClient client) async {
+    if (_chunks.isNotEmpty) {
+      if (_resolvedUrl.isEmpty) _resolvedUrl = url;
+      return;
+    }
     try {
-      final probe = await ServerProber(httpClient: client).probe(
-        url,
-        headers: headers,
-        destinationPath: destinationPath,
+      final init = await _initializer.prepare(
+        url: url, destinationPath: destinationPath, headers: headers,
+        maxConnections: maxConnections, minSplitThreshold: minSplitThreshold,
+        initialChunks: initialChunks, client: client,
+        persistence: _persistence, splitter: _splitter,
+        onProbing: () { _status = DownloadStatus.probing; _emitProgress(); },
+        onLog: callbacks?.onLog,
       );
-      if (probe.linkExpired) {
-        throw ProbeException(
-          'Download link expired (HTTP ${probe.httpStatus})',
-          httpStatus: probe.httpStatus,
-          linkExpired: true,
-        );
-      }
-      _resolvedUrl = probe.finalUrl;
-      _totalSize = probe.totalSize;
-      _supportsRanges = probe.supportsRanges;
-      _filename = probe.filename ?? p.basename(destinationPath);
-      _initialElapsedSec = 0.0;
-      _chunks
-        ..clear()
-        ..addAll(
-          _splitter.buildInitialChunks(
-            totalSize: _totalSize,
-            supportsRanges: _supportsRanges,
-            maxConnections: maxConnections,
-            minSplitThreshold: minSplitThreshold,
-            destinationPath: destinationPath,
-            initialChunks: initialChunks,
-          ),
-        );
-      await _saveCurrentState();
+      _resolvedUrl = init.resolvedUrl;
+      _filename = init.filename;
+      _totalSize = init.totalSize;
+      _supportsRanges = init.supportsRanges;
+      _initialElapsedSec = init.initialElapsedSec;
+      _chunks..clear()..addAll(init.chunks);
+      if (!init.restoredFromCheckpoint) await _saveCurrentState();
     } on ProbeException catch (e) {
       _status = DownloadStatus.failed;
       _emitProgress();
@@ -317,6 +276,7 @@ class TurboDownloadEngine {
         httpClient: client,
         url: _resolvedUrl,
         headers: headers,
+        supportsRanges: _supportsRanges,
         readChunk: () => _chunks.firstWhere((c) => c.chunkId == chunkId),
         updateChunk: (updater) {
           final index = _chunks.indexWhere((c) => c.chunkId == chunkId);
@@ -350,6 +310,7 @@ class TurboDownloadEngine {
 
   Future<void> _finalizeCancelled() async {
     _speedTracker.pause();
+    await _saveQueue;
     await _persistence.cleanupTempDir(destinationPath);
     _status = DownloadStatus.cancelled;
     _emitProgress();
@@ -357,18 +318,21 @@ class TurboDownloadEngine {
 
   Future<void> _saveCurrentState() {
     if (_chunks.isEmpty || _isCancelled) return Future<void>.value();
-    return _persistence.saveState(
-      PersistedDownloadState(
-        url: _resolvedUrl.isNotEmpty ? _resolvedUrl : url,
-        destinationPath: destinationPath,
-        totalSize: _totalSize,
-        supportsRanges: _supportsRanges,
-        filename: _filename,
-        headers: headers,
-        accumulatedActiveSeconds: _speedTracker.elapsedActiveSeconds,
-        chunks: List<DownloadChunk>.unmodifiable(_chunks),
-      ),
+    final state = PersistedDownloadState(
+      url: _resolvedUrl.isNotEmpty ? _resolvedUrl : url,
+      destinationPath: destinationPath,
+      totalSize: _totalSize,
+      supportsRanges: _supportsRanges,
+      filename: _filename,
+      headers: headers,
+      accumulatedActiveSeconds: _speedTracker.elapsedActiveSeconds,
+      chunks: List<DownloadChunk>.unmodifiable(_chunks),
     );
+    _saveQueue = _saveQueue.then((_) async {
+      if (_isCancelled) return;
+      await _persistence.saveState(state);
+    }).catchError((_) {});
+    return _saveQueue;
   }
 
   void _abortAllWorkers() {

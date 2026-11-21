@@ -87,5 +87,17 @@ void main() {
       expect(result.finalUrl, endsWith('/real/archive.7z'));
       expect(result.filename, 'archive.7z');
     });
+
+    test('returns supportsRanges false when Range 0-0 gets 200 OK despite Accept-Ranges header', () async {
+      server.rejectHeadWith405 = true;
+      server.supportRanges = false;
+      server.fakeAcceptRangesHeader = true;
+
+      final result = await ServerProber().probe(server.fileUrl('/deceptive.zip'));
+
+      expect(result.httpStatus, 200);
+      expect(result.totalSize, payload.length);
+      expect(result.supportsRanges, isFalse);
+    });
   });
 }

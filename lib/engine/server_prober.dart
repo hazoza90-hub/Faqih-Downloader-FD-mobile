@@ -113,13 +113,20 @@ class ServerProber {
         probeUri,
         <String, String>{...headers, HttpHeaders.rangeHeader: 'bytes=0-0'},
         allowError: true,
+        requestedRange: true,
       );
       if (rangeRes != null && rangeRes.linkExpired) return rangeRes;
 
       if (rangeRes != null && rangeRes.httpStatus >= 200 && rangeRes.httpStatus < 300) {
         result = _mergeProbe(result, rangeRes);
       } else if (!headOk) {
-        final plainRes = await _probeGet(client, probeUri, headers, allowError: false);
+        final plainRes = await _probeGet(
+          client,
+          probeUri,
+          headers,
+          allowError: false,
+          requestedRange: false,
+        );
         if (plainRes!.linkExpired) return plainRes;
         result = _mergeProbe(result, plainRes);
       }
@@ -172,6 +179,7 @@ class ServerProber {
     Uri uri,
     Map<String, String> headers, {
     required bool allowError,
+    required bool requestedRange,
   }) async {
     try {
       final resp = await _send(client, 'GET', uri, headers);
@@ -205,10 +213,16 @@ class ServerProber {
           supportsRanges = true;
         }
       }
-      if (totalSize == 0 && status == HttpStatus.ok) {
-        totalSize = _parseContentLength(resp.headers);
-        final ar = (resp.headers.value(HttpHeaders.acceptRangesHeader) ?? '').toLowerCase();
-        supportsRanges = ar == 'bytes' && totalSize > 0;
+      if (status == HttpStatus.ok) {
+        if (totalSize == 0) {
+          totalSize = _parseContentLength(resp.headers);
+        }
+        if (requestedRange) {
+          supportsRanges = false;
+        } else {
+          final ar = (resp.headers.value(HttpHeaders.acceptRangesHeader) ?? '').toLowerCase();
+          supportsRanges = ar == 'bytes' && totalSize > 0;
+        }
       }
 
       return ProbeResult(

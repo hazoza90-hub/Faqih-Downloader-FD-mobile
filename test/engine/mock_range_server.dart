@@ -25,9 +25,11 @@ class MockRangeServer {
 
   bool rejectHeadWith405 = false;
   bool supportRanges = true;
+  bool fakeAcceptRangesHeader = false;
   bool unknownContentLength = false;
   bool serveHtml = false;
   int? forceErrorStatus;
+  int dropAfterBytesOnce = 0;
   String? contentDisposition;
   String? redirectPath;
   Duration chunkDelay = Duration.zero;
@@ -117,7 +119,7 @@ class MockRangeServer {
           'bytes $start-$end/${payload.length}',
         );
         resp.contentLength = sliceLen;
-        await _streamRange(resp, start, end);
+        await _streamRange(resp, start, end, allowDrop: false);
         return;
       }
 
@@ -125,7 +127,12 @@ class MockRangeServer {
       if (!unknownContentLength) {
         resp.contentLength = payload.length;
       }
-      await _streamRange(resp, 0, payload.length - 1);
+      await _streamRange(
+        resp,
+        0,
+        payload.length - 1,
+        allowDrop: rangeHeader == null,
+      );
     } catch (_) {
       try {
         await resp.close();
@@ -135,7 +142,7 @@ class MockRangeServer {
 
   void _applyCommonHeaders(HttpResponse resp) {
     resp.headers.contentType = ContentType.binary;
-    if (supportRanges) {
+    if (supportRanges || fakeAcceptRangesHeader) {
       resp.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
     }
     if (contentDisposition != null) {
@@ -143,13 +150,26 @@ class MockRangeServer {
     }
   }
 
-  Future<void> _streamRange(HttpResponse resp, int start, int end) async {
+  Future<void> _streamRange(
+    HttpResponse resp,
+    int start,
+    int end, {
+    required bool allowDrop,
+  }) async {
     var cursor = start;
+    var sentBytes = 0;
     while (cursor <= end) {
       final chunkEnd = math.min(cursor + streamSliceSize, end + 1);
       resp.add(payload.sublist(cursor, chunkEnd));
       await resp.flush();
+      sentBytes += chunkEnd - cursor;
       cursor = chunkEnd;
+      if (allowDrop && dropAfterBytesOnce > 0 && sentBytes >= dropAfterBytesOnce) {
+        dropAfterBytesOnce = 0;
+        final socket = await resp.detachSocket(writeHeaders: false);
+        socket.destroy();
+        return;
+      }
       if (chunkDelay > Duration.zero && cursor <= end) {
         await Future<void>.delayed(chunkDelay);
       }

@@ -78,6 +78,8 @@ class PersistedDownloadState {
 class ChunkPersistence {
   const ChunkPersistence();
 
+  static int _saveSeq = 0;
+
   static String tempDirFor(String destinationPath) => '$destinationPath.sd_parts';
 
   static String stateFilePathFor(String destinationPath) =>
@@ -89,6 +91,7 @@ class ChunkPersistence {
       );
 
   Future<bool> saveState(PersistedDownloadState state) async {
+    File? tmpFile;
     try {
       final tempDir = Directory(tempDirFor(state.destinationPath));
       if (!tempDir.existsSync()) {
@@ -96,13 +99,20 @@ class ChunkPersistence {
       }
 
       final targetFile = File(stateFilePathFor(state.destinationPath));
-      final tmpFile = File('${targetFile.path}.tmp');
+      final uniqueName =
+          'state.${DateTime.now().microsecondsSinceEpoch}.${_saveSeq++}.tmp';
+      tmpFile = File(p.join(tempDir.path, uniqueName));
       final encoded = const JsonEncoder.withIndent('  ').convert(state.toJson());
 
       await tmpFile.writeAsString(encoded, flush: true);
       await _atomicReplace(tmpFile, targetFile);
       return true;
     } catch (_) {
+      if (tmpFile != null && tmpFile.existsSync()) {
+        try {
+          await tmpFile.delete();
+        } catch (_) {}
+      }
       return false;
     }
   }
@@ -110,23 +120,15 @@ class ChunkPersistence {
   Future<PersistedDownloadState?> loadState(String destinationPath) async {
     try {
       final file = File(stateFilePathFor(destinationPath));
-      if (!file.existsSync()) {
-        return null;
-      }
+      if (!file.existsSync()) return null;
       final raw = await file.readAsString();
-      if (raw.trim().isEmpty) {
-        return null;
-      }
+      if (raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        return null;
-      }
+      if (decoded is! Map) return null;
       final parsed = PersistedDownloadState.fromJson(
         Map<String, dynamic>.from(decoded),
       );
-      if (parsed.chunks.isEmpty) {
-        return null;
-      }
+      if (parsed.chunks.isEmpty) return null;
 
       final reconciled = <DownloadChunk>[];
       for (final chunk in parsed.chunks) {
@@ -158,6 +160,20 @@ class ChunkPersistence {
           status = ChunkStatus.pending;
         }
 
+        if (!parsed.supportsRanges && status != ChunkStatus.completed) {
+          diskBytes = 0;
+          status = ChunkStatus.pending;
+          if (partFile.existsSync()) {
+            try {
+              await partFile.delete();
+            } catch (_) {
+              try {
+                partFile.writeAsBytesSync(const <int>[], flush: true);
+              } catch (_) {}
+            }
+          }
+        }
+
         reconciled.add(
           chunk.copyWith(
             downloadedBytes: diskBytes,
@@ -184,9 +200,7 @@ class ChunkPersistence {
 
   Future<void> cleanupTempDir(String destinationPath) async {
     final dir = Directory(tempDirFor(destinationPath));
-    if (!dir.existsSync()) {
-      return;
-    }
+    if (!dir.existsSync()) return;
     try {
       await dir.delete(recursive: true);
     } catch (_) {

@@ -42,8 +42,10 @@ class IsolateDownloadRunner {
   final Completer<void> _readyCompleter = Completer<void>();
   final Completer<void> _completionCompleter = Completer<void>();
   bool _disposed = false;
+  Object? _lastError;
 
   Future<void> get completion => _completionCompleter.future;
+  Object? get lastError => _lastError;
 
   Future<void> start() async {
     if (_isolate != null || _disposed) {
@@ -126,13 +128,19 @@ class IsolateDownloadRunner {
         final linkExpired = map['linkExpired'] == true;
         final httpStatus = (map['httpStatus'] as num?)?.toInt();
         final err = StateError(errorMsg);
-        callbacks?.onError?.call(
+        _lastError = err;
+        final onError = callbacks?.onError;
+        onError?.call(
           err,
           linkExpired: linkExpired,
           httpStatus: httpStatus,
         );
         if (!_completionCompleter.isCompleted) {
-          _completionCompleter.completeError(err);
+          if (onError != null) {
+            _completionCompleter.complete();
+          } else {
+            _completionCompleter.completeError(err);
+          }
         }
         unawaited(dispose());
     }

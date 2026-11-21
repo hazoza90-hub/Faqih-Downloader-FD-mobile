@@ -41,6 +41,7 @@ class ChunkWorker {
     required HttpClient httpClient,
     required String url,
     required Map<String, String> headers,
+    required bool supportsRanges,
     required DownloadChunk Function() readChunk,
     required void Function(DownloadChunk Function(DownloadChunk current) updater)
         updateChunk,
@@ -60,20 +61,42 @@ class ChunkWorker {
     await partFile.parent.create(recursive: true);
     final raf = await partFile.open(mode: FileMode.append);
 
+    void resetNonRangeStream() {
+      chunk = readChunk();
+      final isRanged = supportsRanges && chunk.endByte >= 0;
+      if (!isRanged && (chunk.downloadedBytes > 0 || raf.lengthSync() > 0)) {
+        raf.truncateSync(0);
+        raf.setPositionSync(0);
+        updateChunk(
+          (c) => c.copyWith(
+            downloadedBytes: 0,
+            status: ChunkStatus.active,
+            errorMsg: '',
+          ),
+        );
+        chunk = readChunk();
+      }
+    }
+
     try {
       chunk = readChunk();
       if (chunk.isCompleted) return;
-      if (raf.lengthSync() != chunk.downloadedBytes) {
-        raf.truncateSync(chunk.downloadedBytes);
+      final initiallyRanged = supportsRanges && chunk.endByte >= 0;
+      if (!initiallyRanged) {
+        resetNonRangeStream();
+      } else {
+        if (raf.lengthSync() != chunk.downloadedBytes) {
+          raf.truncateSync(chunk.downloadedBytes);
+        }
+        raf.setPositionSync(chunk.downloadedBytes);
       }
-      raf.setPositionSync(chunk.downloadedBytes);
       updateChunk((c) => c.copyWith(status: ChunkStatus.active, errorMsg: ''));
 
       final isGoogleVideo = isGoogleVideoUrl(url);
       var retries = 0;
 
       while (!isPaused() && !isCancelled()) {
-        chunk = readChunk();
+        resetNonRangeStream();
         if (chunk.endByte >= 0 && chunk.currentByte > chunk.endByte) {
           updateChunk((c) => c.copyWith(status: ChunkStatus.completed));
           break;
@@ -83,6 +106,7 @@ class ChunkWorker {
             httpClient: httpClient,
             url: url,
             headers: headers,
+            supportsRanges: supportsRanges,
             isGoogleVideo: isGoogleVideo,
             raf: raf,
             readChunk: readChunk,
@@ -100,6 +124,11 @@ class ChunkWorker {
           if (chunk.endByte == -1 || chunk.currentByte > chunk.endByte) {
             updateChunk((c) => c.copyWith(status: ChunkStatus.completed));
             break;
+          }
+          if (!(supportsRanges && chunk.endByte >= 0)) {
+            throw HttpException(
+              'Premature EOF at byte ${chunk.currentByte} of ${chunk.endByte + 1}',
+            );
           }
           retries = 0;
         } on ChunkWorkerException {
@@ -143,6 +172,7 @@ class ChunkWorker {
     required HttpClient httpClient,
     required String url,
     required Map<String, String> headers,
+    required bool supportsRanges,
     required bool isGoogleVideo,
     required RandomAccessFile raf,
     required DownloadChunk Function() readChunk,
@@ -157,7 +187,7 @@ class ChunkWorker {
     required Duration requestTimeout,
   }) async {
     final snapshot = readChunk();
-    final isRanged = snapshot.endByte >= 0;
+    final isRanged = supportsRanges && snapshot.endByte >= 0;
     final rangeStart = snapshot.currentByte;
     final targetUrl = (isRanged && isGoogleVideo)
         ? buildGoogleVideoWindowUrl(

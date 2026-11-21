@@ -177,5 +177,87 @@ void main() {
       expect(File(destPath).existsSync(), isFalse);
       expect(Directory(ChunkPersistence.tempDirFor(destPath)).existsSync(), isFalse);
     });
+
+    test('handles non-range server with known Content-Length across drop/retry and pause/resume', () async {
+      server.supportRanges = false;
+      server.unknownContentLength = false;
+      server.streamSliceSize = 16 * 1024;
+      server.chunkDelay = const Duration(milliseconds: 20);
+      server.dropAfterBytesOnce = 96 * 1024;
+      final destPath = p.join(tempDir.path, 'non_range_known.bin');
+
+      final triggerPause = Completer<void>();
+      final engine1 = TurboDownloadEngine(
+        url: server.fileUrl('/non_range_known.bin'),
+        destinationPath: destPath,
+        maxConnections: 4,
+        callbacks: EngineCallbacks(
+          onProgress: (snap) {
+            if (snap.status == DownloadStatus.downloading &&
+                snap.downloadedBytes >= 64 * 1024 &&
+                !triggerPause.isCompleted) {
+              triggerPause.complete();
+            }
+          },
+        ),
+      );
+
+      final startFuture = engine1.start();
+      await triggerPause.future;
+      await engine1.pause();
+      await startFuture;
+
+      expect(engine1.status, DownloadStatus.paused);
+      expect(server.requestedRanges, isEmpty);
+
+      // New engine resumes cleanly from byte 0, survives a mid-stream drop, and matches SHA-256.
+      server.chunkDelay = Duration.zero;
+      server.dropAfterBytesOnce = 96 * 1024;
+      final engine2 = TurboDownloadEngine(
+        url: server.fileUrl('/non_range_known.bin'),
+        destinationPath: destPath,
+        maxConnections: 4,
+        expectedSha256: expectedSha,
+      );
+
+      await engine2.start();
+
+      expect(engine2.status, DownloadStatus.completed);
+      expect(server.requestedRanges, isEmpty);
+      expect(sha256HexOf(File(destPath).readAsBytesSync()), expectedSha);
+    });
+
+    test('handles rapid pause followed immediately by resume without race', () async {
+      server.streamSliceSize = 16 * 1024;
+      server.chunkDelay = const Duration(milliseconds: 25);
+      final destPath = p.join(tempDir.path, 'rapid_resume.bin');
+      final started = Completer<void>();
+
+      final engine = TurboDownloadEngine(
+        url: server.fileUrl('/rapid_resume.bin'),
+        destinationPath: destPath,
+        maxConnections: 2,
+        expectedSha256: expectedSha,
+        callbacks: EngineCallbacks(
+          onProgress: (snap) {
+            if (snap.status == DownloadStatus.downloading &&
+                snap.downloadedBytes > 0 &&
+                !started.isCompleted) {
+              started.complete();
+            }
+          },
+        ),
+      );
+
+      final startFut = engine.start();
+      await started.future;
+
+      final pauseFut = engine.pause();
+      final resumeFut = engine.resume();
+      await Future.wait(<Future<void>>[startFut, pauseFut, resumeFut]);
+
+      expect(engine.status, DownloadStatus.completed);
+      expect(sha256HexOf(File(destPath).readAsBytesSync()), expectedSha);
+    });
   });
 }

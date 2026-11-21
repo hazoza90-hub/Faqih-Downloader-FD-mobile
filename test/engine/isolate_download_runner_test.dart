@@ -135,5 +135,36 @@ void main() {
       expect(File(destPath).existsSync(), isFalse);
       expect(Directory(ChunkPersistence.tempDirFor(destPath)).existsSync(), isFalse);
     });
+
+    test('delivers HTTP 403 failure to onError and lastError without unhandled async exception', () async {
+      server.rejectHeadWith405 = true;
+      server.forceErrorStatus = 403;
+      final destPath = p.join(tempDir.path, 'iso_expired.bin');
+
+      Object? capturedError;
+      bool? capturedExpired;
+      int? capturedStatus;
+
+      final runner = IsolateDownloadRunner(
+        url: server.fileUrl('/iso_expired.bin'),
+        destinationPath: destPath,
+        callbacks: EngineCallbacks(
+          onError: (err, {linkExpired = false, httpStatus}) {
+            capturedError = err;
+            capturedExpired = linkExpired;
+            capturedStatus = httpStatus;
+          },
+        ),
+      );
+
+      await runner.start();
+      await runner.completion;
+      await runner.dispose();
+
+      expect(capturedError, isNotNull);
+      expect(capturedExpired, isTrue);
+      expect(capturedStatus, 403);
+      expect(runner.lastError, isNotNull);
+    });
   });
 }
