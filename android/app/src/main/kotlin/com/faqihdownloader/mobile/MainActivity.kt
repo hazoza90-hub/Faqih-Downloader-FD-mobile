@@ -1,6 +1,7 @@
 package com.faqihdownloader.mobile
 
 import android.content.Intent
+import com.faqihdownloader.mobile.bridge.CookiesBridge
 import com.faqihdownloader.mobile.bridge.ForegroundServiceBridge
 import com.faqihdownloader.mobile.bridge.MediaStoreBridge
 import com.faqihdownloader.mobile.bridge.ShareIntentBridge
@@ -13,6 +14,7 @@ class MainActivity : FlutterActivity() {
     private var foregroundServiceBridge: ForegroundServiceBridge? = null
     private var shareIntentBridge: ShareIntentBridge? = null
     private var mediaStoreBridge: MediaStoreBridge? = null
+    private var cookiesBridge: CookiesBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -25,6 +27,7 @@ class MainActivity : FlutterActivity() {
             captureInitialIntent(intent)
         }
         mediaStoreBridge = MediaStoreBridge(applicationContext).apply { attach(messenger) }
+        cookiesBridge = CookiesBridge().apply { attach(messenger) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -38,10 +41,12 @@ class MainActivity : FlutterActivity() {
         foregroundServiceBridge?.dispose()
         shareIntentBridge?.dispose()
         mediaStoreBridge?.dispose()
+        cookiesBridge?.dispose()
         youtubeDlBridge = null
         foregroundServiceBridge = null
         shareIntentBridge = null
         mediaStoreBridge = null
+        cookiesBridge = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

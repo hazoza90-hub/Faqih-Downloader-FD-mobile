@@ -7,6 +7,7 @@ import 'app_constants.dart';
 class AppSettings {
   const AppSettings({
     this.language = 'ar',
+    this.themeMode = 'dark',
     this.maxConnections = AppConstants.defaultMaxConnections,
     this.maxConcurrentDownloads = AppConstants.defaultMaxConcurrentDownloads,
     this.speedLimitBytesPerSec = 0,
@@ -16,9 +17,11 @@ class AppSettings {
     this.subtitleEmbedMode = AppConstants.subtitleModeSoftMux,
     this.wifiOnlyDownloads = false,
     this.clipboardAutoCheck = true,
+    this.cookiesFilePath = '',
   });
 
   final String language;
+  final String themeMode;
   final int maxConnections;
   final int maxConcurrentDownloads;
   final int speedLimitBytesPerSec;
@@ -28,9 +31,11 @@ class AppSettings {
   final String subtitleEmbedMode;
   final bool wifiOnlyDownloads;
   final bool clipboardAutoCheck;
+  final String cookiesFilePath;
 
   AppSettings copyWith({
     String? language,
+    String? themeMode,
     int? maxConnections,
     int? maxConcurrentDownloads,
     int? speedLimitBytesPerSec,
@@ -40,9 +45,11 @@ class AppSettings {
     String? subtitleEmbedMode,
     bool? wifiOnlyDownloads,
     bool? clipboardAutoCheck,
+    String? cookiesFilePath,
   }) {
     return AppSettings(
       language: _normalizeLanguage(language ?? this.language),
+      themeMode: _normalizeThemeMode(themeMode ?? this.themeMode),
       maxConnections: AppConstants.clampConnections(
         maxConnections ?? this.maxConnections,
       ),
@@ -66,12 +73,14 @@ class AppSettings {
       ),
       wifiOnlyDownloads: wifiOnlyDownloads ?? this.wifiOnlyDownloads,
       clipboardAutoCheck: clipboardAutoCheck ?? this.clipboardAutoCheck,
+      cookiesFilePath: (cookiesFilePath ?? this.cookiesFilePath).trim(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'language': language,
+      'themeMode': themeMode,
       'maxConnections': maxConnections,
       'maxConcurrentDownloads': maxConcurrentDownloads,
       'speedLimitBytesPerSec': speedLimitBytesPerSec,
@@ -81,12 +90,14 @@ class AppSettings {
       'subtitleEmbedMode': subtitleEmbedMode,
       'wifiOnlyDownloads': wifiOnlyDownloads,
       'clipboardAutoCheck': clipboardAutoCheck,
+      'cookiesFilePath': cookiesFilePath,
     };
   }
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     return AppSettings(
       language: _normalizeLanguage(json['language']?.toString()),
+      themeMode: _normalizeThemeMode(json['themeMode']?.toString()),
       maxConnections: AppConstants.clampConnections(
         _parseInt(
           json['maxConnections'],
@@ -116,12 +127,19 @@ class AppSettings {
       ),
       wifiOnlyDownloads: _parseBool(json['wifiOnlyDownloads'], false),
       clipboardAutoCheck: _parseBool(json['clipboardAutoCheck'], true),
+      cookiesFilePath: (json['cookiesFilePath']?.toString() ?? '').trim(),
     );
   }
 
   static String _normalizeLanguage(String? raw) {
     final code = (raw ?? 'ar').trim().toLowerCase();
     return code == 'en' ? 'en' : 'ar';
+  }
+
+  static String _normalizeThemeMode(String? raw) {
+    final mode = (raw ?? 'dark').trim().toLowerCase();
+    if (mode == 'light' || mode == 'system') return mode;
+    return 'dark';
   }
 
   static String _normalizeSubtitleMode(String? raw) {
@@ -160,6 +178,7 @@ class AppSettings {
     if (identical(this, other)) return true;
     return other is AppSettings &&
         other.language == language &&
+        other.themeMode == themeMode &&
         other.maxConnections == maxConnections &&
         other.maxConcurrentDownloads == maxConcurrentDownloads &&
         other.speedLimitBytesPerSec == speedLimitBytesPerSec &&
@@ -168,12 +187,14 @@ class AppSettings {
         other.preferredSubtitleLang == preferredSubtitleLang &&
         other.subtitleEmbedMode == subtitleEmbedMode &&
         other.wifiOnlyDownloads == wifiOnlyDownloads &&
-        other.clipboardAutoCheck == clipboardAutoCheck;
+        other.clipboardAutoCheck == clipboardAutoCheck &&
+        other.cookiesFilePath == cookiesFilePath;
   }
 
   @override
   int get hashCode => Object.hash(
     language,
+    themeMode,
     maxConnections,
     maxConcurrentDownloads,
     speedLimitBytesPerSec,
@@ -183,5 +204,6 @@ class AppSettings {
     subtitleEmbedMode,
     wifiOnlyDownloads,
     clipboardAutoCheck,
+    cookiesFilePath,
   );
 }

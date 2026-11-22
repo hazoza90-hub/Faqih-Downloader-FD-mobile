@@ -13,4 +13,5 @@ abstract final class ChannelNames {
   static const String shareEvents = 'com.faqihdownloader.mobile/share_events';
 
   static const String mediaStore = 'com.faqihdownloader.mobile/media_store';
+  static const String cookies = 'com.faqihdownloader.mobile/cookies';
 }
