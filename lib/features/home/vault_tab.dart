@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/i18n/translator.dart';
 import '../../core/models/download_status.dart';
@@ -7,13 +10,14 @@ import '../../core/theme/app_colors.dart';
 import '../../core/utils/size_formatter.dart';
 import 'phase_label_helper.dart';
 
-/// Kanban Tab 3: Searchable, categorized completed/failed download history vault.
+/// Kanban Tab 3: Searchable, categorized completed/failed download vault with share & safe delete.
 class VaultTab extends StatefulWidget {
   const VaultTab({
     super.key,
     required this.translator,
     required this.entries,
     required this.onOpenEntry,
+    required this.onShareEntry,
     required this.onRetryEntry,
     required this.onDeleteEntry,
   });
@@ -21,8 +25,9 @@ class VaultTab extends StatefulWidget {
   final AppTranslator translator;
   final List<HistoryEntry> entries;
   final void Function(HistoryEntry entry) onOpenEntry;
+  final void Function(HistoryEntry entry) onShareEntry;
   final void Function(HistoryEntry entry) onRetryEntry;
-  final void Function(HistoryEntry entry) onDeleteEntry;
+  final void Function(HistoryEntry entry, {required bool deleteFile}) onDeleteEntry;
 
   @override
   State<VaultTab> createState() => _VaultTabState();
@@ -40,11 +45,49 @@ class _VaultTabState extends State<VaultTab> {
         return false;
       }
       if (q.isNotEmpty) {
-        final hay = '${e.filename} ${e.platform} ${e.url}'.toLowerCase();
+        final hay = '${e.filename} ${e.platform} ${e.filePath} ${e.url}'.toLowerCase();
         if (!hay.contains(q)) return false;
       }
       return true;
     }).toList(growable: false);
+  }
+
+  Future<void> _copyPath(HistoryEntry entry) async {
+    await Clipboard.setData(ClipboardData(text: entry.filePath));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.translator.tr('msg_path_copied'))),
+    );
+  }
+
+  Future<void> _confirmDelete(HistoryEntry entry) async {
+    final tr = widget.translator.tr;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr('dlg_delete_title')),
+        content: Text(tr('dlg_delete_body', params: <String, String>{'name': entry.filename})),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(tr('btn_cancel')),
+          ),
+          TextButton(
+            key: Key('vault_del_history_${entry.id}'),
+            onPressed: () => Navigator.of(ctx).pop('history'),
+            child: Text(tr('btn_delete_history_only')),
+          ),
+          FilledButton(
+            key: Key('vault_del_both_${entry.id}'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(ctx).pop('both'),
+            child: Text(tr('btn_delete_with_file')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    widget.onDeleteEntry(entry, deleteFile: choice == 'both');
   }
 
   @override
@@ -131,46 +174,83 @@ class _VaultTabState extends State<VaultTab> {
               final ok = entry.status == DownloadStatus.completed;
               final statusColor = ok ? AppColors.success : AppColors.danger;
               return Card(
-                child: ListTile(
-                  leading: Icon(
-                    ok ? Icons.check_circle_outline : Icons.error_outline,
-                    color: statusColor,
-                  ),
-                  title: Text(
-                    entry.filename,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: Text(
-                    '${tr(PhaseLabelHelper.categoryKey(entry.category))} • '
-                    '${entry.platform} • ${formatFileSize(entry.totalSize)}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      if (ok)
-                        IconButton(
-                          key: Key('vault_open_${entry.id}'),
-                          tooltip: tr('btn_open'),
-                          onPressed: () => widget.onOpenEntry(entry),
-                          icon: const Icon(Icons.open_in_new_rounded, color: AppColors.accent),
-                        )
-                      else
-                        IconButton(
-                          key: Key('vault_retry_${entry.id}'),
-                          tooltip: tr('btn_retry'),
-                          onPressed: () => widget.onRetryEntry(entry),
-                          icon: const Icon(Icons.refresh_rounded, color: AppColors.warning),
+                      Row(
+                        children: <Widget>[
+                          Icon(ok ? Icons.check_circle_outline : Icons.error_outline, color: statusColor),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  entry.filename,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                ),
+                                Text(
+                                  '${tr(PhaseLabelHelper.categoryKey(entry.category))} • '
+                                  '${entry.platform} • ${formatFileSize(entry.totalSize)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (entry.filePath.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: 4),
+                        Text(
+                          entry.filePath,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
                         ),
-                      IconButton(
-                        key: Key('vault_delete_${entry.id}'),
-                        tooltip: tr('btn_delete'),
-                        onPressed: () => widget.onDeleteEntry(entry),
-                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.textSecondary),
+                      ],
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: <Widget>[
+                          if (ok) ...<Widget>[
+                            IconButton(
+                              key: Key('vault_open_${entry.id}'),
+                              tooltip: tr('btn_open'),
+                              onPressed: () => widget.onOpenEntry(entry),
+                              icon: const Icon(Icons.open_in_new_rounded, size: 20, color: AppColors.accent),
+                            ),
+                            IconButton(
+                              key: Key('vault_share_${entry.id}'),
+                              tooltip: tr('btn_share'),
+                              onPressed: () => widget.onShareEntry(entry),
+                              icon: const Icon(Icons.share_outlined, size: 20, color: AppColors.accent),
+                            ),
+                          ] else
+                            IconButton(
+                              key: Key('vault_retry_${entry.id}'),
+                              tooltip: tr('btn_retry'),
+                              onPressed: () => widget.onRetryEntry(entry),
+                              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.warning),
+                            ),
+                          if (entry.filePath.isNotEmpty)
+                            IconButton(
+                              key: Key('vault_copy_path_${entry.id}'),
+                              tooltip: tr('btn_copy_path'),
+                              onPressed: () => unawaited(_copyPath(entry)),
+                              icon: const Icon(Icons.copy_rounded, size: 19, color: AppColors.textSecondary),
+                            ),
+                          IconButton(
+                            key: Key('vault_delete_${entry.id}'),
+                            tooltip: tr('btn_delete'),
+                            onPressed: () => unawaited(_confirmDelete(entry)),
+                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.danger),
+                          ),
+                        ],
                       ),
                     ],
                   ),

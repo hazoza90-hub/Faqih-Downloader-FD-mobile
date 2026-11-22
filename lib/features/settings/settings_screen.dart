@@ -6,6 +6,9 @@ import '../../core/i18n/translator.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/size_formatter.dart';
 import 'cookies_login_screen.dart';
+import 'settings_media_prefs_section.dart';
+import 'settings_sniffer_section.dart';
+import 'settings_storage_section.dart';
 import 'update_dialog.dart';
 
 /// Application settings screen wiring language, theme, concurrency, cookies, and updaters.
@@ -206,17 +209,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           s.copyWith(wifiOnlyDownloads: v),
                         ),
                       ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(tr('lbl_auto_categorize')),
-                        value: s.autoCategorizeFolders,
-                        onChanged: (v) => widget.controller.updateSettings(
-                          s.copyWith(autoCategorizeFolders: v),
-                        ),
-                      ),
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 14),
+              _SectionTitle(tr('storage_section')),
+              SettingsStorageSection(
+                translator: widget.translator,
+                settings: s,
+                onChanged: (next) => widget.controller.updateSettings(next),
+                onPickSaveDir: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final ok = await widget.controller.pickCustomSaveDirectory();
+                  if (ok && context.mounted) {
+                    _showSnack(
+                      messenger,
+                      tr('msg_save_dir_updated', params: <String, String>{
+                        'path': widget.controller.settings.customSaveDisplayLabel,
+                      }),
+                    );
+                  }
+                },
+                onResetSaveDir: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  await widget.controller.resetSaveDirectory();
+                  if (context.mounted) _showSnack(messenger, tr('msg_save_dir_reset'));
+                },
+              ),
+              const SizedBox(height: 14),
+              _SectionTitle(tr('sniffer_section')),
+              SettingsSnifferSection(
+                translator: widget.translator,
+                settings: s,
+                onChanged: (next) => widget.controller.updateSettings(next),
+              ),
+              const SizedBox(height: 14),
+              _SectionTitle(tr('media_prefs_section')),
+              SettingsMediaPrefsSection(
+                translator: widget.translator,
+                settings: s,
+                onChanged: (next) => widget.controller.updateSettings(next),
               ),
               const SizedBox(height: 14),
               _SectionTitle(tr('settings_cookies')),

@@ -126,6 +126,8 @@ class MediaPostPipeline {
         subtitlePath: subPath,
         outputPath: burnOut,
         fontsDir: fontsDir ?? workDir,
+        subtitlePosition: request.subtitlePosition,
+        subtitleFontSize: request.subtitleFontSize,
         audioCodec: wasMuxedToMp4
             ? 'aac'
             : (request.selectedAudioTrack?.codec ??

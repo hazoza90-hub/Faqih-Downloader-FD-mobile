@@ -1,8 +1,11 @@
 package com.faqihdownloader.mobile.bridge
 
+import android.Manifest
+import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -10,7 +13,8 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
-import androidx.core.content.FileProvider
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -23,16 +27,26 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
-class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCallHandler {
+/** Handles MediaStore/SAF downloads export, file open/share/delete, subtitle picking, and permissions. */
+class MediaStoreBridge(
+    private val appContext: Context,
+    private val activityProvider: () -> Activity? = { null },
+) : MethodChannel.MethodCallHandler {
 
     companion object {
         const val METHOD_CHANNEL = "com.faqihdownloader.mobile/media_store"
         private const val BUFFER_BYTES = 64 * 1024
+        private const val REQ_PICK_TREE = 4101
+        private const val REQ_PICK_SUBTITLE = 4102
+        private const val REQ_NOTIF_PERMISSION = 4103
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var methodChannel: MethodChannel? = null
+    private var pendingTreeResult: MethodChannel.Result? = null
+    private var pendingSubResult: MethodChannel.Result? = null
+    private var pendingPermResult: MethodChannel.Result? = null
 
     fun attach(messenger: BinaryMessenger) {
         methodChannel = MethodChannel(messenger, METHOD_CHANNEL).apply {
@@ -43,91 +57,147 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
     fun dispose() {
         scope.cancel()
         methodChannel?.setMethodCallHandler(null)
+        pendingTreeResult = null
+        pendingSubResult = null
+        pendingPermResult = null
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "getAppWorkDir" -> {
-                val workDir = File(appContext.filesDir, "downloads_work")
-                if (!workDir.exists()) workDir.mkdirs()
+                val workDir = File(appContext.filesDir, "downloads_work").apply { mkdirs() }
                 result.success(workDir.absolutePath)
             }
             "exportToDownloads" -> handleExportToDownloads(call, result)
             "openFile" -> handleOpenFile(call, result)
+            "shareFile" -> handleShareFile(call, result)
+            "deleteExportedFile" -> handleDeleteExportedFile(call, result)
+            "pickSaveDirectory" -> handlePickSaveDirectory(result)
+            "pickSubtitleFile" -> handlePickSubtitleFile(result)
+            "requestNotificationPermission" -> handleRequestNotifPermission(result)
             else -> result.notImplemented()
         }
+    }
+
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == REQ_PICK_TREE) {
+            val cb = pendingTreeResult ?: return false
+            pendingTreeResult = null
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                cb.success(null)
+                return true
+            }
+            val uri = data.data!!
+            val flags = (data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+                .takeIf { it != 0 } ?: (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            runCatching { appContext.contentResolver.takePersistableUriPermission(uri, flags) }
+            val name = SafFolderHelper.resolveTreeDisplayName(appContext, uri)
+            cb.success(mapOf("treeUri" to uri.toString(), "displayName" to name))
+            return true
+        }
+        if (requestCode == REQ_PICK_SUBTITLE) {
+            val cb = pendingSubResult ?: return false
+            pendingSubResult = null
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                cb.success(null)
+                return true
+            }
+            val uri = data.data!!
+            scope.launch {
+                try {
+                    val res = SafFolderHelper.copyPickedSubtitleToWorkDir(appContext, uri)
+                    mainHandler.post { cb.success(res) }
+                } catch (t: Throwable) {
+                    mainHandler.post { cb.error("SUB_PICK_ERROR", t.message ?: t.javaClass.simpleName, null) }
+                }
+            }
+            return true
+        }
+        return false
+    }
+
+    fun handleRequestPermissionsResult(requestCode: Int, grantResults: IntArray): Boolean {
+        if (requestCode != REQ_NOTIF_PERMISSION) return false
+        val cb = pendingPermResult ?: return false
+        pendingPermResult = null
+        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        cb.success(granted)
+        return true
+    }
+
+    private fun handlePickSaveDirectory(result: MethodChannel.Result) {
+        val activity = activityProvider() ?: return result.error("NO_ACTIVITY", "Activity unavailable", null)
+        if (pendingTreeResult != null) return result.error("BUSY", "Directory picker already active", null)
+        pendingTreeResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        activity.startActivityForResult(intent, REQ_PICK_TREE)
+    }
+
+    private fun handlePickSubtitleFile(result: MethodChannel.Result) {
+        val activity = activityProvider() ?: return result.error("NO_ACTIVITY", "Activity unavailable", null)
+        if (pendingSubResult != null) return result.error("BUSY", "Subtitle picker already active", null)
+        pendingSubResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        activity.startActivityForResult(intent, REQ_PICK_SUBTITLE)
+    }
+
+    private fun handleRequestNotifPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            result.success(true)
+            return
+        }
+        val granted = ContextCompat.checkSelfPermission(appContext, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            result.success(true)
+            return
+        }
+        val activity = activityProvider()
+        if (activity == null || pendingPermResult != null) {
+            result.success(false)
+            return
+        }
+        pendingPermResult = result
+        ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF_PERMISSION)
     }
 
     private fun handleExportToDownloads(call: MethodCall, result: MethodChannel.Result) {
         val sourcePath = call.argument<String>("sourcePath")?.trim().orEmpty()
         val displayName = call.argument<String>("displayName")?.trim().orEmpty()
-        val mimeType = call.argument<String>("mimeType")?.trim().orEmpty()
-            .ifEmpty { "application/octet-stream" }
+        val mimeType = call.argument<String>("mimeType")?.trim().orEmpty().ifEmpty { "application/octet-stream" }
         val subFolder = call.argument<String>("subFolder")?.trim().orEmpty()
+        val treeUri = call.argument<String>("treeUri")?.trim().orEmpty()
         val deleteSource = call.argument<Boolean>("deleteSource") ?: false
-
         if (sourcePath.isEmpty() || displayName.isEmpty()) {
-            result.error("INVALID_ARGS", "sourcePath and displayName are required", null)
-            return
+            return result.error("INVALID_ARGS", "sourcePath and displayName are required", null)
         }
-
         scope.launch {
             try {
                 val sourceFile = File(sourcePath)
-                if (!sourceFile.isFile) {
-                    throw IllegalArgumentException("Source file does not exist: $sourcePath")
+                if (!sourceFile.isFile) throw IllegalArgumentException("Source file does not exist: $sourcePath")
+                val exported = when {
+                    treeUri.isNotEmpty() -> SafFolderHelper.exportToTreeUri(appContext, sourceFile, treeUri, displayName, mimeType, subFolder)
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> exportWithMediaStore(sourceFile, displayName, mimeType, subFolder)
+                    else -> exportLegacyDownloads(sourceFile, displayName, mimeType, subFolder)
                 }
-
-                val exported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    exportWithMediaStore(sourceFile, displayName, mimeType, subFolder)
-                } else {
-                    exportLegacyDownloads(sourceFile, displayName, mimeType, subFolder)
-                }
-
-                if (deleteSource) {
-                    runCatching { sourceFile.delete() }
-                }
+                if (deleteSource) runCatching { sourceFile.delete() }
                 mainHandler.post { result.success(exported) }
             } catch (t: Throwable) {
-                mainHandler.post {
-                    result.error("MEDIA_STORE_ERROR", t.message ?: t.javaClass.simpleName, null)
-                }
+                mainHandler.post { result.error("MEDIA_STORE_ERROR", t.message ?: t.javaClass.simpleName, null) }
             }
         }
     }
 
-    private fun sanitizeSubFolder(raw: String): String {
-        var clean = raw.replace(Regex("[\\\\/:*?\"<>|]+"), "")
-        while (clean.contains("..")) {
-            clean = clean.replace("..", "")
-        }
-        clean = clean.trim().trim('.').trim()
-        return if (clean.isEmpty() || clean == "." || clean == "..") "" else clean
-    }
-
-    private fun sanitizeDisplayName(raw: String): String {
-        var clean = raw.replace(Regex("[\\\\/:*?\"<>|]+"), "")
-        while (clean.contains("..")) {
-            clean = clean.replace("..", "")
-        }
-        clean = clean.trim().trim('.').trim()
-        return if (clean.isEmpty() || clean == "." || clean == "..") "download.bin" else clean
-    }
-
-    private fun exportWithMediaStore(
-        sourceFile: File,
-        displayName: String,
-        mimeType: String,
-        subFolder: String,
-    ): Map<String, Any> {
-        val cleanSub = sanitizeSubFolder(subFolder)
-        val safeName = sanitizeDisplayName(displayName)
-        val relativeDir = if (cleanSub.isEmpty()) {
-            "${Environment.DIRECTORY_DOWNLOADS}/FaqihDownloader"
-        } else {
-            "${Environment.DIRECTORY_DOWNLOADS}/FaqihDownloader/$cleanSub"
-        }
-
+    private fun exportWithMediaStore(sourceFile: File, displayName: String, mimeType: String, subFolder: String): Map<String, Any> {
+        val cleanSub = SafFolderHelper.sanitizeSubFolder(subFolder)
+        val safeName = SafFolderHelper.sanitizeDisplayName(displayName)
+        val relativeDir = if (cleanSub.isEmpty()) "${Environment.DIRECTORY_DOWNLOADS}/FaqihDownloader"
+        else "${Environment.DIRECTORY_DOWNLOADS}/FaqihDownloader/$cleanSub"
         val resolver = appContext.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
@@ -135,144 +205,90 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
             put(MediaStore.MediaColumns.RELATIVE_PATH, relativeDir)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             ?: throw IllegalStateException("Failed to insert MediaStore Downloads row")
-
         var copiedBytes = 0L
         try {
             resolver.openOutputStream(uri)?.use { outStream ->
                 FileInputStream(sourceFile).use { inStream ->
                     val buffer = ByteArray(BUFFER_BYTES)
                     while (true) {
-                        val count = inStream.read(buffer)
-                        if (count <= 0) break
-                        outStream.write(buffer, 0, count)
-                        copiedBytes += count
+                        val n = inStream.read(buffer)
+                        if (n <= 0) break
+                        outStream.write(buffer, 0, n)
+                        copiedBytes += n
                     }
                     outStream.flush()
                 }
             } ?: throw IllegalStateException("Failed to open output stream for $uri")
-
-            val publish = ContentValues().apply {
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
-            }
-            resolver.update(uri, publish, null, null)
+            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
         } catch (t: Throwable) {
             runCatching { resolver.delete(uri, null, null) }
             throw t
         }
-
-        return mapOf(
-            "uri" to uri.toString(),
-            "displayPath" to "$relativeDir/$safeName",
-            "sizeBytes" to copiedBytes,
-        )
+        return mapOf("uri" to uri.toString(), "displayPath" to "$relativeDir/$safeName", "sizeBytes" to copiedBytes)
     }
 
     @Suppress("DEPRECATION")
-    private fun exportLegacyDownloads(
-        sourceFile: File,
-        displayName: String,
-        mimeType: String,
-        subFolder: String,
-    ): Map<String, Any> {
-        val cleanSub = sanitizeSubFolder(subFolder)
-        val safeName = sanitizeDisplayName(displayName)
+    private fun exportLegacyDownloads(sourceFile: File, displayName: String, mimeType: String, subFolder: String): Map<String, Any> {
+        val cleanSub = SafFolderHelper.sanitizeSubFolder(subFolder)
+        val safeName = SafFolderHelper.sanitizeDisplayName(displayName)
         val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val targetDir = if (cleanSub.isEmpty()) {
-            File(baseDir, "FaqihDownloader")
-        } else {
-            File(File(baseDir, "FaqihDownloader"), cleanSub)
-        }
+        val targetDir = if (cleanSub.isEmpty()) File(baseDir, "FaqihDownloader") else File(File(baseDir, "FaqihDownloader"), cleanSub)
         if (!targetDir.exists()) targetDir.mkdirs()
-
-        val targetFile = resolveUniqueLegacyFile(targetDir, safeName)
+        var targetFile = File(targetDir, safeName)
+        var counter = 1
+        while (targetFile.exists()) {
+            val dot = safeName.lastIndexOf('.')
+            val stem = if (dot > 0) safeName.substring(0, dot) else safeName
+            val ext = if (dot > 0) safeName.substring(dot) else ""
+            targetFile = File(targetDir, "$stem (${counter++})$ext")
+        }
         val tmpFile = File(targetDir, "${targetFile.name}.tmp")
         var copiedBytes = 0L
         try {
-            FileInputStream(sourceFile).use { inStream ->
-                FileOutputStream(tmpFile).use { outStream ->
-                    val buffer = ByteArray(BUFFER_BYTES)
-                    while (true) {
-                        val count = inStream.read(buffer)
-                        if (count <= 0) break
-                        outStream.write(buffer, 0, count)
-                        copiedBytes += count
-                    }
-                    outStream.fd.sync()
+            FileInputStream(sourceFile).use { ins ->
+                FileOutputStream(tmpFile).use { outs ->
+                    val buf = ByteArray(BUFFER_BYTES)
+                    while (true) { val n = ins.read(buf); if (n <= 0) break; outs.write(buf, 0, n); copiedBytes += n }
+                    outs.fd.sync()
                 }
             }
-            if (!tmpFile.renameTo(targetFile)) {
-                tmpFile.copyTo(targetFile, overwrite = true)
-                tmpFile.delete()
-            }
-        } catch (t: Throwable) {
-            runCatching { tmpFile.delete() }
-            throw t
-        }
-
-        MediaScannerConnection.scanFile(
-            appContext,
-            arrayOf(targetFile.absolutePath),
-            arrayOf(mimeType),
-            null,
-        )
-        return mapOf(
-            "uri" to Uri.fromFile(targetFile).toString(),
-            "displayPath" to targetFile.absolutePath,
-            "sizeBytes" to copiedBytes,
-        )
-    }
-
-    private fun resolveUniqueLegacyFile(dir: File, displayName: String): File {
-        var candidate = File(dir, displayName)
-        if (!candidate.exists()) return candidate
-        val dotIdx = displayName.lastIndexOf('.')
-        val stem = if (dotIdx > 0) displayName.substring(0, dotIdx) else displayName
-        val ext = if (dotIdx > 0) displayName.substring(dotIdx) else ""
-        var counter = 1
-        while (candidate.exists()) {
-            candidate = File(dir, "$stem ($counter)$ext")
-            counter++
-        }
-        return candidate
+            if (!tmpFile.renameTo(targetFile)) { tmpFile.copyTo(targetFile, overwrite = true); tmpFile.delete() }
+        } catch (t: Throwable) { runCatching { tmpFile.delete() }; throw t }
+        MediaScannerConnection.scanFile(appContext, arrayOf(targetFile.absolutePath), arrayOf(mimeType), null)
+        return mapOf("uri" to Uri.fromFile(targetFile).toString(), "displayPath" to targetFile.absolutePath, "sizeBytes" to copiedBytes)
     }
 
     private fun handleOpenFile(call: MethodCall, result: MethodChannel.Result) {
         val pathOrUri = call.argument<String>("pathOrUri")?.trim().orEmpty()
-        val mimeType = call.argument<String>("mimeType")?.trim().orEmpty()
-            .ifEmpty { "*/*" }
-        if (pathOrUri.isEmpty()) {
-            result.error("INVALID_ARGS", "pathOrUri is required", null)
-            return
-        }
+        val mimeType = call.argument<String>("mimeType")?.trim().orEmpty().ifEmpty { "*/*" }
+        if (pathOrUri.isEmpty()) return result.error("INVALID_ARGS", "pathOrUri is required", null)
         try {
-            val uri = when {
-                pathOrUri.startsWith("content://") -> Uri.parse(pathOrUri)
-                pathOrUri.startsWith("file://") -> {
-                    val filePath = Uri.parse(pathOrUri).path
-                        ?: throw IllegalArgumentException("Invalid file URI: $pathOrUri")
-                    FileProvider.getUriForFile(
-                        appContext,
-                        "${appContext.packageName}.fileprovider",
-                        File(filePath),
-                    )
-                }
-                else -> FileProvider.getUriForFile(
-                    appContext,
-                    "${appContext.packageName}.fileprovider",
-                    File(pathOrUri),
-                )
-            }
-            val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+            val uri = SafFolderHelper.resolveContentOrFileUri(appContext, pathOrUri)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            appContext.startActivity(viewIntent)
+            appContext.startActivity(intent)
             result.success(true)
-        } catch (t: Throwable) {
-            result.error("OPEN_FILE_ERROR", t.message ?: t.javaClass.simpleName, null)
+        } catch (t: Throwable) { result.error("OPEN_FILE_ERROR", t.message ?: t.javaClass.simpleName, null) }
+    }
+
+    private fun handleShareFile(call: MethodCall, result: MethodChannel.Result) {
+        val pathOrUri = call.argument<String>("pathOrUri")?.trim().orEmpty()
+        val mimeType = call.argument<String>("mimeType")?.trim().orEmpty().ifEmpty { "*/*" }
+        if (pathOrUri.isEmpty()) return result.error("INVALID_ARGS", "pathOrUri is required", null)
+        try { SafFolderHelper.shareFile(appContext, pathOrUri, mimeType); result.success(true) }
+        catch (t: Throwable) { result.error("SHARE_FILE_ERROR", t.message ?: t.javaClass.simpleName, null) }
+    }
+
+    private fun handleDeleteExportedFile(call: MethodCall, result: MethodChannel.Result) {
+        val pathOrUri = call.argument<String>("pathOrUri")?.trim().orEmpty()
+        if (pathOrUri.isEmpty()) return result.error("INVALID_ARGS", "pathOrUri is required", null)
+        scope.launch {
+            val ok = runCatching { SafFolderHelper.deleteExportedFile(appContext, pathOrUri) }.getOrDefault(false)
+            mainHandler.post { result.success(ok) }
         }
     }
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/config/app_constants.dart';
+import '../../core/config/app_settings.dart';
 import '../../core/i18n/translator.dart';
 import '../../core/models/audio_track.dart';
 import '../../core/models/clip_range.dart';
@@ -32,11 +34,15 @@ class MediaOptionsSheet extends StatefulWidget {
     super.key,
     required this.streamInfo,
     required this.translator,
+    this.settings,
+    this.onPickExternalSubtitle,
     this.enableVideoPlayerPreview = true,
   });
 
   final YouTubeStreamInfo streamInfo;
   final AppTranslator translator;
+  final AppSettings? settings;
+  final Future<SubtitleTrack?> Function()? onPickExternalSubtitle;
   final bool enableVideoPlayerPreview;
 
   @override
@@ -48,6 +54,7 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
   String _audioFormat = 'mp3';
   VideoFormatOption? _selectedFormat;
   AudioTrack? _selectedAudio;
+  late List<SubtitleTrack> _subtitles;
   SubtitleTrack? _selectedSubtitle;
   SubtitleMode _subtitleMode = SubtitleMode.none;
   ClipRange? _clipRange;
@@ -55,14 +62,68 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
   @override
   void initState() {
     super.initState();
-    _audioOnly = widget.streamInfo.isAudioOnly || widget.streamInfo.videoFormats.isEmpty;
-    if (widget.streamInfo.videoFormats.isNotEmpty) {
-      _selectedFormat = widget.streamInfo.videoFormats.first;
+    final info = widget.streamInfo;
+    final s = widget.settings;
+    _audioOnly = info.isAudioOnly || info.videoFormats.isEmpty;
+    _subtitles = List<SubtitleTrack>.from(info.subtitleTracks);
+
+    if (info.videoFormats.isNotEmpty) {
+      final prefH = s?.preferredVideoHeight ?? 0;
+      _selectedFormat = prefH > 0
+          ? info.videoFormats.firstWhere(
+              (f) => f.height == prefH,
+              orElse: () => info.videoFormats.firstWhere(
+                (f) => f.height <= prefH,
+                orElse: () => info.videoFormats.first,
+              ),
+            )
+          : info.videoFormats.first;
     }
-    _selectedAudio = widget.streamInfo.selectedAudioTrack ??
-        (widget.streamInfo.audioTracks.isNotEmpty
-            ? widget.streamInfo.audioTracks.first
-            : null);
+
+    if (info.audioTracks.isNotEmpty) {
+      final prefAudio = s?.preferredAudioLang ?? 'original';
+      if (prefAudio == 'original') {
+        _selectedAudio = info.selectedAudioTrack ??
+            info.audioTracks.firstWhere(
+              (a) => a.isOriginal,
+              orElse: () => info.audioTracks.first,
+            );
+      } else {
+        _selectedAudio = info.audioTracks.firstWhere(
+          (a) => a.language.toLowerCase().startsWith(prefAudio),
+          orElse: () => info.selectedAudioTrack ?? info.audioTracks.first,
+        );
+      }
+    } else {
+      _selectedAudio = info.selectedAudioTrack;
+    }
+
+    final prefSub = s?.preferredSubtitleLang ?? 'none';
+    if (prefSub != 'none' && _subtitles.isNotEmpty) {
+      for (final sub in _subtitles) {
+        if (sub.language.toLowerCase().startsWith(prefSub)) {
+          _selectedSubtitle = sub;
+          _subtitleMode = s?.subtitleEmbedMode == AppConstants.subtitleModeHardBurn
+              ? SubtitleMode.hardBurn
+              : SubtitleMode.softMux;
+          break;
+        }
+      }
+    }
+  }
+
+  Future<void> _pickExternalSubtitle() async {
+    final track = await widget.onPickExternalSubtitle?.call();
+    if (!mounted || track == null) return;
+    setState(() {
+      _subtitles.add(track);
+      _selectedSubtitle = track;
+      if (_subtitleMode == SubtitleMode.none) {
+        _subtitleMode = widget.settings?.subtitleEmbedMode == AppConstants.subtitleModeHardBurn
+            ? SubtitleMode.hardBurn
+            : SubtitleMode.softMux;
+      }
+    });
   }
 
   Future<void> _openClipper() async {
@@ -81,6 +142,7 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
   }
 
   void _submitStart() {
+    final s = widget.settings;
     final url = widget.streamInfo.webpageUrl.isNotEmpty
         ? widget.streamInfo.webpageUrl
         : widget.streamInfo.videoUrl;
@@ -98,6 +160,8 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
       headers: widget.streamInfo.videoHeaders,
       platform: widget.streamInfo.platform,
       durationSec: widget.streamInfo.durationSec,
+      subtitlePosition: s?.subtitlePosition ?? 'bottom',
+      subtitleFontSize: s?.subtitleFontSize ?? 20,
     );
     Navigator.of(context).pop(
       MediaSheetResult(
@@ -198,7 +262,7 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
               audioTracks: info.audioTracks,
               selectedAudio: _selectedAudio,
               onAudioSelected: (a) => setState(() => _selectedAudio = a),
-              subtitleTracks: info.subtitleTracks,
+              subtitleTracks: _subtitles,
               selectedSubtitle: _selectedSubtitle,
               subtitleMode: _subtitleMode,
               audioOnly: _audioOnly,
@@ -206,11 +270,15 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
                 setState(() {
                   _selectedSubtitle = s;
                   if (s != null && _subtitleMode == SubtitleMode.none) {
-                    _subtitleMode = SubtitleMode.softMux;
+                    _subtitleMode = widget.settings?.subtitleEmbedMode == AppConstants.subtitleModeHardBurn
+                        ? SubtitleMode.hardBurn
+                        : SubtitleMode.softMux;
                   }
                 });
               },
               onSubtitleModeChanged: (m) => setState(() => _subtitleMode = m),
+              onPickExternalSubtitle:
+                  widget.onPickExternalSubtitle == null ? null : _pickExternalSubtitle,
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(

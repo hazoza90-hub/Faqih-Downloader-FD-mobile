@@ -33,6 +33,7 @@ class MediaStoreChannel {
     required String displayName,
     required String mimeType,
     String? subFolder,
+    String? treeUri,
     bool deleteSource = false,
   }) async {
     try {
@@ -42,8 +43,8 @@ class MediaStoreChannel {
           'sourcePath': sourcePath,
           'displayName': displayName,
           'mimeType': mimeType,
-          if (subFolder != null && subFolder.trim().isNotEmpty)
-            'subFolder': subFolder,
+          if (subFolder != null && subFolder.trim().isNotEmpty) 'subFolder': subFolder,
+          if (treeUri != null && treeUri.trim().isNotEmpty) 'treeUri': treeUri.trim(),
           'deleteSource': deleteSource,
         },
       );
@@ -64,8 +65,7 @@ class MediaStoreChannel {
         'openFile',
         <String, dynamic>{
           'pathOrUri': pathOrUri,
-          if (mimeType != null && mimeType.trim().isNotEmpty)
-            'mimeType': mimeType,
+          if (mimeType != null && mimeType.trim().isNotEmpty) 'mimeType': mimeType,
         },
       );
       return res ?? false;
@@ -73,6 +73,74 @@ class MediaStoreChannel {
       throw NativeBridgeException(e.code, e.message ?? 'Platform error', e.details);
     } on MissingPluginException catch (e) {
       throw NativeBridgeException('MISSING_PLUGIN', e.message ?? 'Missing plugin');
+    }
+  }
+
+  Future<PickedDirectoryResult?> pickSaveDirectory() async {
+    try {
+      final res = await _methodChannel.invokeMethod<Map<Object?, Object?>>('pickSaveDirectory');
+      if (res == null) return null;
+      final parsed = PickedDirectoryResult.fromMap(res);
+      return parsed.treeUri.isEmpty ? null : parsed;
+    } on PlatformException catch (e) {
+      throw NativeBridgeException(e.code, e.message ?? 'Platform error', e.details);
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  Future<PickedSubtitleResult?> pickSubtitleFile() async {
+    try {
+      final res = await _methodChannel.invokeMethod<Map<Object?, Object?>>('pickSubtitleFile');
+      if (res == null) return null;
+      final parsed = PickedSubtitleResult.fromMap(res);
+      return parsed.path.isEmpty ? null : parsed;
+    } on PlatformException catch (e) {
+      throw NativeBridgeException(e.code, e.message ?? 'Platform error', e.details);
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  Future<bool> shareFile({required String pathOrUri, String? mimeType}) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'shareFile',
+        <String, dynamic>{
+          'pathOrUri': pathOrUri,
+          if (mimeType != null && mimeType.trim().isNotEmpty) 'mimeType': mimeType,
+        },
+      );
+      return res ?? false;
+    } on PlatformException catch (e) {
+      throw NativeBridgeException(e.code, e.message ?? 'Platform error', e.details);
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  Future<bool> deleteExportedFile({required String pathOrUri}) async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>(
+        'deleteExportedFile',
+        <String, dynamic>{'pathOrUri': pathOrUri},
+      );
+      return res ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  Future<bool> requestNotificationPermission() async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('requestNotificationPermission');
+      return res ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
     }
   }
 }

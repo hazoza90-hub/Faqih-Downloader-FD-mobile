@@ -122,6 +122,42 @@ class ExportResult {
 }
 
 @immutable
+class PickedDirectoryResult {
+  const PickedDirectoryResult({
+    required this.treeUri,
+    required this.displayName,
+  });
+
+  final String treeUri;
+  final String displayName;
+
+  factory PickedDirectoryResult.fromMap(Map<Object?, Object?> map) {
+    return PickedDirectoryResult(
+      treeUri: map['treeUri']?.toString() ?? '',
+      displayName: map['displayName']?.toString() ?? '',
+    );
+  }
+}
+
+@immutable
+class PickedSubtitleResult {
+  const PickedSubtitleResult({
+    required this.path,
+    required this.name,
+  });
+
+  final String path;
+  final String name;
+
+  factory PickedSubtitleResult.fromMap(Map<Object?, Object?> map) {
+    return PickedSubtitleResult(
+      path: map['path']?.toString() ?? '',
+      name: map['name']?.toString() ?? '',
+    );
+  }
+}
+
+@immutable
 class ForegroundProgressPayload {
   const ForegroundProgressPayload({
     required this.title,

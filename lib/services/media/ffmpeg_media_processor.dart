@@ -149,12 +149,25 @@ class FfmpegMediaProcessor {
     return outputPath;
   }
 
+  static int assAlignmentForPosition(String position) {
+    switch (position.trim().toLowerCase()) {
+      case 'top':
+        return 8;
+      case 'middle':
+        return 5;
+      default:
+        return 2;
+    }
+  }
+
   Future<String> burnHardSubtitles({
     required String videoPath,
     required String subtitlePath,
     required String outputPath,
     required String fontsDir,
     String? style,
+    String subtitlePosition = 'bottom',
+    int subtitleFontSize = 20,
     String? audioCodec,
     ClipRange? clipRange,
     required String processId,
@@ -163,9 +176,11 @@ class FfmpegMediaProcessor {
   }) async {
     final escapedSub = SubtitleProcessor.escapeForFfmpegFilter(subtitlePath);
     final escapedFonts = SubtitleProcessor.escapeForFfmpegFilter(fontsDir);
+    final safeSize = subtitleFontSize.clamp(14, 32);
+    final alignment = assAlignmentForPosition(subtitlePosition);
     final effectiveStyle = (style == null || style.trim().isEmpty)
         ? 'FontName=${SubtitleFontProvisioner.defaultFontFamily},'
-            'FontSize=20,PrimaryColour=&H00FFFFFF,'
+            'FontSize=$safeSize,Alignment=$alignment,PrimaryColour=&H00FFFFFF,'
             'OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1'
         : style.trim();
 

@@ -40,6 +40,8 @@ class UrlInputBar extends StatelessWidget {
                     child: TextField(
                       key: const Key('url_input_field'),
                       controller: controller,
+                      minLines: 1,
+                      maxLines: 3,
                       keyboardType: TextInputType.url,
                       textInputAction: TextInputAction.go,
                       onSubmitted: (_) => onSubmit(),

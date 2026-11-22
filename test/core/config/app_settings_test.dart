@@ -49,9 +49,38 @@ void main() {
         subtitleEmbedMode: AppConstants.subtitleModeHardBurn,
         wifiOnlyDownloads: true,
         clipboardAutoCheck: false,
+        clipboardSnifferActive: false,
+        clipboardAutoAnalyze: true,
+        snifferPlatforms: <String, bool>{
+          'youtube': true,
+          'tiktok': false,
+          'instagram': true,
+          'facebook': false,
+          'twitter': true,
+          'direct': false,
+        },
+        customSaveTreeUri: 'content://com.android.externalstorage.documents/tree/primary%3AMyDownloads',
+        customSaveDisplayLabel: 'MyDownloads',
+        preferredVideoHeight: 720,
+        preferredAudioLang: 'ar',
+        subtitlePosition: 'top',
+        subtitleFontSize: 26,
       );
       await repo.save(custom);
       expect(repo.load(), equals(custom));
+
+      // Validates normalization and font-size clamping for Batch 6 fields:
+      final normalized = AppSettings.fromJson(<String, dynamic>{
+        'subtitlePosition': 'invalid_pos',
+        'subtitleFontSize': 99,
+        'preferredAudioLang': 'fr',
+        'preferredVideoHeight': 9999,
+      });
+      expect(normalized.subtitlePosition, 'bottom');
+      expect(normalized.subtitleFontSize, 32);
+      expect(normalized.preferredAudioLang, 'original');
+      expect(normalized.preferredVideoHeight, 0);
+      expect(normalized.clipboardSnifferActive, isTrue);
 
       await repo.reset();
       expect(repo.load(), equals(const AppSettings()));

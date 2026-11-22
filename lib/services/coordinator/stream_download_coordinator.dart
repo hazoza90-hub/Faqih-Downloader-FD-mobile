@@ -108,7 +108,8 @@ class StreamDownloadCoordinator {
         sourcePath: plan.sourcePath,
         displayName: plan.displayName,
         mimeType: CoordinatorHelpers.mimeTypeForExt(plan.ext),
-        subFolder: plan.category,
+        subFolder: request.autoCategorizeFolders ? plan.category : null,
+        treeUri: request.customSaveTreeUri.isEmpty ? null : request.customSaveTreeUri,
         deleteSource: true,
       );
 

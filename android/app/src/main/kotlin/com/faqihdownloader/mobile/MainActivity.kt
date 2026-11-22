@@ -26,8 +26,23 @@ class MainActivity : FlutterActivity() {
             attach(messenger)
             captureInitialIntent(intent)
         }
-        mediaStoreBridge = MediaStoreBridge(applicationContext).apply { attach(messenger) }
+        mediaStoreBridge = MediaStoreBridge(applicationContext) { this }.apply { attach(messenger) }
         cookiesBridge = CookiesBridge().apply { attach(messenger) }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (mediaStoreBridge?.handleActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (mediaStoreBridge?.handleRequestPermissionsResult(requestCode, grantResults) == true) return
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
     override fun onNewIntent(intent: Intent) {

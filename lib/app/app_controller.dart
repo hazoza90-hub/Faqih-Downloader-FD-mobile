@@ -9,6 +9,7 @@ import '../core/config/app_settings.dart';
 import '../core/config/settings_repository.dart';
 import '../core/i18n/translator.dart';
 import '../core/models/history_entry.dart';
+import '../core/models/subtitle_track.dart';
 import '../core/models/youtube_stream_info.dart';
 import '../core/utils/filename_sanitizer.dart';
 import '../core/utils/url_detector.dart';
@@ -20,13 +21,13 @@ import '../platform/share_intent_channel.dart';
 import '../platform/youtube_dl_channel.dart';
 import '../services/coordinator/download_job_models.dart';
 import '../services/coordinator/download_queue_manager.dart';
-import '../services/coordinator/job_export_helper.dart';
 import '../services/coordinator/stream_download_coordinator.dart';
 import '../services/history/history_manager.dart';
 import '../services/history/history_storage.dart';
 import '../services/media/ffmpeg_media_processor.dart';
 import '../services/media/media_extractor_service.dart';
 import '../services/updater/github_release_updater.dart';
+import 'vault_storage_actions.dart';
 
 /// Result returned when analyzing a user URL (either direct HTTP or rich media info).
 @immutable
@@ -93,6 +94,13 @@ class AppController extends ChangeNotifier {
   bool _isExtracting = false;
   String? _activeExtractProcessId;
   int _jobCounter = 0;
+
+  late final VaultStorageActions _vaultActions = VaultStorageActions(
+    mediaStore: _mediaStore,
+    historyProvider: () => _history,
+    settingsProvider: () => _settings,
+    saveSettings: updateSettings,
+  );
 
   bool get isInitialized => _initialized;
   bool get nativeReady => _nativeReady;
@@ -221,6 +229,19 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  int stageUrls(Iterable<String> rawUrls) {
+    var added = 0;
+    for (final raw in rawUrls) {
+      final url = raw.trim();
+      if (url.isNotEmpty && !_stagedUrls.contains(url)) {
+        _stagedUrls.insert(0, url);
+        added++;
+      }
+    }
+    if (added > 0) notifyListeners();
+    return added;
+  }
+
   void removeStagedUrl(String url) {
     if (_stagedUrls.remove(url)) notifyListeners();
   }
@@ -239,9 +260,7 @@ class AppController extends ChangeNotifier {
     final uri = Uri.tryParse(url.trim());
     final rawName = (customTitle?.trim().isNotEmpty ?? false)
         ? customTitle!.trim()
-        : (uri != null && uri.pathSegments.isNotEmpty
-            ? uri.pathSegments.last
-            : 'download');
+        : (uri != null && uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download');
     final safeTitle = sanitizeFilename(rawName, fallback: 'download');
     final id = 'job_${DateTime.now().millisecondsSinceEpoch}_${++_jobCounter}';
     final req = DownloadJobRequest(
@@ -252,6 +271,10 @@ class AppController extends ChangeNotifier {
       speedLimitBytesPerSec: _settings.speedLimitBytesPerSec,
       cookiesFile: _effectiveCookiesFile(),
       platform: UrlDetector.extractMediaPlatform(url) ?? 'Direct',
+      customSaveTreeUri: _settings.customSaveTreeUri,
+      autoCategorizeFolders: _settings.autoCategorizeFolders,
+      subtitlePosition: _settings.subtitlePosition,
+      subtitleFontSize: _settings.subtitleFontSize,
     );
     return _queue!.enqueue(req);
   }
@@ -279,6 +302,10 @@ class AppController extends ChangeNotifier {
       categorySubFolder: request.categorySubFolder,
       platform: request.platform,
       durationSec: request.durationSec,
+      customSaveTreeUri: _settings.customSaveTreeUri,
+      autoCategorizeFolders: _settings.autoCategorizeFolders,
+      subtitlePosition: _settings.subtitlePosition,
+      subtitleFontSize: _settings.subtitleFontSize,
     );
     return _queue!.enqueue(effective);
   }
@@ -324,19 +351,17 @@ class AppController extends ChangeNotifier {
     await updateSettings(_settings.copyWith(cookiesFilePath: ''));
   }
 
-  Future<bool> openVaultEntry(HistoryEntry entry) {
-    final target = (entry.contentUri != null && entry.contentUri!.trim().isNotEmpty)
-        ? entry.contentUri!
-        : entry.filePath;
-    final mimeType = CoordinatorHelpers.mimeTypeForExt(
-      p.extension(entry.filename).replaceFirst('.', ''),
-    );
-    return _mediaStore.openFile(pathOrUri: target, mimeType: mimeType);
-  }
-
-  Future<void> removeHistoryEntry(String id, {bool deleteFile = false}) async {
-    await _history?.remove(id, deleteFile: deleteFile);
-  }
+  Future<bool> openVaultEntry(HistoryEntry entry) => _vaultActions.openEntry(entry);
+  Future<bool> shareVaultEntry(HistoryEntry entry) => _vaultActions.shareEntry(entry);
+  Future<void> deleteVaultEntry(HistoryEntry entry, {required bool deleteFile}) =>
+      _vaultActions.deleteEntry(entry, deleteFile: deleteFile);
+  Future<void> removeHistoryEntry(String id, {bool deleteFile = false}) async =>
+      _history?.remove(id, deleteFile: deleteFile);
+  Future<bool> pickCustomSaveDirectory() => _vaultActions.pickCustomSaveDirectory();
+  Future<void> resetSaveDirectory() => _vaultActions.resetSaveDirectory();
+  Future<SubtitleTrack?> pickExternalSubtitleFile() => _vaultActions.pickExternalSubtitleFile();
+  Future<void> requestNotificationPermissionOnce() =>
+      _vaultActions.requestNotificationPermissionOnce();
 
   String? _effectiveCookiesFile() {
     final path = _settings.cookiesFilePath.trim();

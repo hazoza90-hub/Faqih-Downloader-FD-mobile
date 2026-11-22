@@ -121,7 +121,11 @@ void main() {
     expect(controller.settings.speedLimitBytesPerSec, 1024 * 1024);
 
     // Trigger yt-dlp update:
-    await tester.ensureVisible(find.byKey(const Key('btn_update_ytdlp')));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('btn_update_ytdlp')),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const Key('btn_update_ytdlp')));
     await tester.pumpAndSettle();
     expect(updateCalled, 1);

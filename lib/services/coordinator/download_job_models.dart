@@ -79,6 +79,10 @@ class DownloadJobRequest {
     this.categorySubFolder,
     this.platform = 'Direct',
     this.durationSec = 0,
+    this.customSaveTreeUri = '',
+    this.autoCategorizeFolders = true,
+    this.subtitlePosition = 'bottom',
+    this.subtitleFontSize = 20,
   });
 
   final String id;
@@ -98,6 +102,10 @@ class DownloadJobRequest {
   final String? categorySubFolder;
   final String platform;
   final int durationSec;
+  final String customSaveTreeUri;
+  final bool autoCategorizeFolders;
+  final String subtitlePosition;
+  final int subtitleFontSize;
 
   bool get isMediaJob =>
       selectedVideoFormat != null ||
@@ -128,6 +136,10 @@ class DownloadJobRequest {
       categorySubFolder: categorySubFolder,
       platform: platform,
       durationSec: durationSec,
+      customSaveTreeUri: customSaveTreeUri,
+      autoCategorizeFolders: autoCategorizeFolders,
+      subtitlePosition: subtitlePosition,
+      subtitleFontSize: subtitleFontSize,
     );
   }
 }

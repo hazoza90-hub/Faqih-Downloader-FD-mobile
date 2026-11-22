@@ -183,6 +183,35 @@ void main() {
       expect(vfArg, contains(r"\'sub\:1.srt"));
       expect(burnArgs, containsAllInOrder(<String>['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-c:a', 'aac', '-b:a', '192k']));
       expect(ratios.last, 1.0);
+
+      // 7. Subtitle alignment (top=8, middle=5, bottom=2) and FontSize clamping:
+      await processor.burnHardSubtitles(
+        videoPath: 'in.mp4',
+        subtitlePath: 'ar.srt',
+        outputPath: 'top.mp4',
+        fontsDir: 'fonts',
+        subtitlePosition: 'top',
+        subtitleFontSize: 28,
+        processId: 'p_top',
+      );
+      final topVf = capturedCalls.last[capturedCalls.last.indexOf('-vf') + 1];
+      expect(topVf, contains('Alignment=8'));
+      expect(topVf, contains('FontSize=28'));
+
+      await processor.burnHardSubtitles(
+        videoPath: 'in.mp4',
+        subtitlePath: 'ar.srt',
+        outputPath: 'mid.mp4',
+        fontsDir: 'fonts',
+        subtitlePosition: 'middle',
+        subtitleFontSize: 99,
+        processId: 'p_mid',
+      );
+      final midVf = capturedCalls.last[capturedCalls.last.indexOf('-vf') + 1];
+      expect(midVf, contains('Alignment=5'));
+      expect(midVf, contains('FontSize=32'));
+
+      expect(FfmpegMediaProcessor.assAlignmentForPosition('bottom'), 2);
     });
   });
 }
