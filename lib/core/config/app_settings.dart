@@ -8,6 +8,7 @@ class AppSettings {
   const AppSettings({
     this.language = 'ar',
     this.maxConnections = AppConstants.defaultMaxConnections,
+    this.maxConcurrentDownloads = AppConstants.defaultMaxConcurrentDownloads,
     this.speedLimitBytesPerSec = 0,
     this.autoCategorizeFolders = true,
     this.defaultQuality = AppConstants.defaultQuality,
@@ -19,6 +20,7 @@ class AppSettings {
 
   final String language;
   final int maxConnections;
+  final int maxConcurrentDownloads;
   final int speedLimitBytesPerSec;
   final bool autoCategorizeFolders;
   final String defaultQuality;
@@ -30,6 +32,7 @@ class AppSettings {
   AppSettings copyWith({
     String? language,
     int? maxConnections,
+    int? maxConcurrentDownloads,
     int? speedLimitBytesPerSec,
     bool? autoCategorizeFolders,
     String? defaultQuality,
@@ -42,6 +45,9 @@ class AppSettings {
       language: _normalizeLanguage(language ?? this.language),
       maxConnections: AppConstants.clampConnections(
         maxConnections ?? this.maxConnections,
+      ),
+      maxConcurrentDownloads: AppConstants.clampConcurrentDownloads(
+        maxConcurrentDownloads ?? this.maxConcurrentDownloads,
       ),
       speedLimitBytesPerSec: _clampSpeed(
         speedLimitBytesPerSec ?? this.speedLimitBytesPerSec,
@@ -67,6 +73,7 @@ class AppSettings {
     return <String, dynamic>{
       'language': language,
       'maxConnections': maxConnections,
+      'maxConcurrentDownloads': maxConcurrentDownloads,
       'speedLimitBytesPerSec': speedLimitBytesPerSec,
       'autoCategorizeFolders': autoCategorizeFolders,
       'defaultQuality': defaultQuality,
@@ -84,6 +91,12 @@ class AppSettings {
         _parseInt(
           json['maxConnections'],
           AppConstants.defaultMaxConnections,
+        ),
+      ),
+      maxConcurrentDownloads: AppConstants.clampConcurrentDownloads(
+        _parseInt(
+          json['maxConcurrentDownloads'],
+          AppConstants.defaultMaxConcurrentDownloads,
         ),
       ),
       speedLimitBytesPerSec: _clampSpeed(
@@ -148,6 +161,7 @@ class AppSettings {
     return other is AppSettings &&
         other.language == language &&
         other.maxConnections == maxConnections &&
+        other.maxConcurrentDownloads == maxConcurrentDownloads &&
         other.speedLimitBytesPerSec == speedLimitBytesPerSec &&
         other.autoCategorizeFolders == autoCategorizeFolders &&
         other.defaultQuality == defaultQuality &&
@@ -161,6 +175,7 @@ class AppSettings {
   int get hashCode => Object.hash(
     language,
     maxConnections,
+    maxConcurrentDownloads,
     speedLimitBytesPerSec,
     autoCategorizeFolders,
     defaultQuality,

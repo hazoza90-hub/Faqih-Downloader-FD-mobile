@@ -4,6 +4,7 @@ import '../config/app_constants.dart';
 import 'audio_track.dart';
 import 'clip_range.dart';
 import 'subtitle_track.dart';
+import 'video_format_option.dart';
 
 /// Resolved metadata and stream descriptors for YouTube and social media videos.
 @immutable
@@ -34,6 +35,11 @@ class YouTubeStreamInfo {
     this.subtitleEmbedMode = AppConstants.subtitleModeSoftMux,
     this.clipRange,
     this.externalSubtitleTracks = const <SubtitleTrack>[],
+    this.videoFormats = const <VideoFormatOption>[],
+    this.audioTracks = const <AudioTrack>[],
+    this.subtitleTracks = const <SubtitleTrack>[],
+    this.playlistEntries = const <YouTubeStreamInfo>[],
+    this.isPlaylist = false,
   });
 
   final String videoId;
@@ -61,6 +67,11 @@ class YouTubeStreamInfo {
   final String subtitleEmbedMode;
   final ClipRange? clipRange;
   final List<SubtitleTrack> externalSubtitleTracks;
+  final List<VideoFormatOption> videoFormats;
+  final List<AudioTrack> audioTracks;
+  final List<SubtitleTrack> subtitleTracks;
+  final List<YouTubeStreamInfo> playlistEntries;
+  final bool isPlaylist;
 
   bool get isDualStream =>
       !isProgressive && !isAudioOnly && (audioUrl?.isNotEmpty ?? false);
@@ -101,6 +112,11 @@ class YouTubeStreamInfo {
     ClipRange? clipRange,
     bool clearClipRange = false,
     List<SubtitleTrack>? externalSubtitleTracks,
+    List<VideoFormatOption>? videoFormats,
+    List<AudioTrack>? audioTracks,
+    List<SubtitleTrack>? subtitleTracks,
+    List<YouTubeStreamInfo>? playlistEntries,
+    bool? isPlaylist,
   }) {
     return YouTubeStreamInfo(
       videoId: videoId ?? this.videoId,
@@ -137,6 +153,17 @@ class YouTubeStreamInfo {
       externalSubtitleTracks: List<SubtitleTrack>.unmodifiable(
         externalSubtitleTracks ?? this.externalSubtitleTracks,
       ),
+      videoFormats: List<VideoFormatOption>.unmodifiable(
+        videoFormats ?? this.videoFormats,
+      ),
+      audioTracks: List<AudioTrack>.unmodifiable(audioTracks ?? this.audioTracks),
+      subtitleTracks: List<SubtitleTrack>.unmodifiable(
+        subtitleTracks ?? this.subtitleTracks,
+      ),
+      playlistEntries: List<YouTubeStreamInfo>.unmodifiable(
+        playlistEntries ?? this.playlistEntries,
+      ),
+      isPlaylist: isPlaylist ?? this.isPlaylist,
     );
   }
 
@@ -167,16 +194,17 @@ class YouTubeStreamInfo {
         'clipRange': clipRange?.toJson(),
         'externalSubtitleTracks':
             externalSubtitleTracks.map((t) => t.toJson()).toList(growable: false),
+        'videoFormats':
+            videoFormats.map((f) => f.toJson()).toList(growable: false),
+        'audioTracks': audioTracks.map((a) => a.toJson()).toList(growable: false),
+        'subtitleTracks':
+            subtitleTracks.map((s) => s.toJson()).toList(growable: false),
+        'playlistEntries':
+            playlistEntries.map((e) => e.toJson()).toList(growable: false),
+        'isPlaylist': isPlaylist,
       };
 
   factory YouTubeStreamInfo.fromJson(Map<String, dynamic> json) {
-    final rawSubs = json['externalSubtitleTracks'];
-    final extSubs = rawSubs is List
-        ? rawSubs
-            .whereType<Map>()
-            .map((m) => SubtitleTrack.fromJson(Map<String, dynamic>.from(m)))
-            .toList(growable: false)
-        : const <SubtitleTrack>[];
     return YouTubeStreamInfo(
       videoId: json['videoId']?.toString() ?? '',
       title: json['title']?.toString() ?? '',
@@ -204,7 +232,24 @@ class YouTubeStreamInfo {
       subtitleEmbedMode:
           json['subtitleEmbedMode']?.toString() ?? AppConstants.subtitleModeSoftMux,
       clipRange: _parseMap(json['clipRange'], ClipRange.fromJson),
-      externalSubtitleTracks: List<SubtitleTrack>.unmodifiable(extSubs),
+      externalSubtitleTracks:
+          _parseList(json['externalSubtitleTracks'], SubtitleTrack.fromJson),
+      videoFormats: _parseList(json['videoFormats'], VideoFormatOption.fromJson),
+      audioTracks: _parseList(json['audioTracks'], AudioTrack.fromJson),
+      subtitleTracks: _parseList(json['subtitleTracks'], SubtitleTrack.fromJson),
+      playlistEntries:
+          _parseList(json['playlistEntries'], YouTubeStreamInfo.fromJson),
+      isPlaylist: json['isPlaylist'] == true,
+    );
+  }
+
+  static List<T> _parseList<T>(
+    Object? raw,
+    T Function(Map<String, dynamic>) parser,
+  ) {
+    if (raw is! List) return <T>[];
+    return List<T>.unmodifiable(
+      raw.whereType<Map>().map((m) => parser(Map<String, dynamic>.from(m))),
     );
   }
 
@@ -251,7 +296,12 @@ class YouTubeStreamInfo {
           other.selectedSubtitleTrack == selectedSubtitleTrack &&
           other.subtitleEmbedMode == subtitleEmbedMode &&
           other.clipRange == clipRange &&
-          listEquals(other.externalSubtitleTracks, externalSubtitleTracks));
+          listEquals(other.externalSubtitleTracks, externalSubtitleTracks) &&
+          listEquals(other.videoFormats, videoFormats) &&
+          listEquals(other.audioTracks, audioTracks) &&
+          listEquals(other.subtitleTracks, subtitleTracks) &&
+          listEquals(other.playlistEntries, playlistEntries) &&
+          other.isPlaylist == isPlaylist);
 
   @override
   int get hashCode => Object.hashAll(<Object?>[
@@ -261,6 +311,9 @@ class YouTubeStreamInfo {
         thumbnailUrl, isAudioOnly, platform, webpageUrl, audioFormatId,
         audioLanguage, selectedAudioTrack, selectedSubtitleTrack,
         subtitleEmbedMode, clipRange, Object.hashAll(externalSubtitleTracks),
+        Object.hashAll(videoFormats), Object.hashAll(audioTracks),
+        Object.hashAll(subtitleTracks), Object.hashAll(playlistEntries),
+        isPlaylist,
       ]);
 
   static int _mapHash(Map<String, String> map) => Object.hashAllUnordered(

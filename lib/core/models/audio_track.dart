@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+typedef AudioTrackOption = AudioTrack;
+
 /// Selectable audio or dubbed language track associated with a media stream.
 @immutable
 class AudioTrack {
@@ -10,6 +12,8 @@ class AudioTrack {
     required this.label,
     required this.url,
     this.ext = 'm4a',
+    this.codec = '',
+    this.bitrateKbps = 0,
     this.filesize = 0,
     this.isOriginal = false,
     this.httpHeaders = const <String, String>{},
@@ -21,6 +25,8 @@ class AudioTrack {
   final String label;
   final String url;
   final String ext;
+  final String codec;
+  final int bitrateKbps;
   final int filesize;
   final bool isOriginal;
   final Map<String, String> httpHeaders;
@@ -32,6 +38,8 @@ class AudioTrack {
     String? label,
     String? url,
     String? ext,
+    String? codec,
+    int? bitrateKbps,
     int? filesize,
     bool? isOriginal,
     Map<String, String>? httpHeaders,
@@ -43,6 +51,8 @@ class AudioTrack {
       label: label ?? this.label,
       url: url ?? this.url,
       ext: ext ?? this.ext,
+      codec: codec ?? this.codec,
+      bitrateKbps: bitrateKbps ?? this.bitrateKbps,
       filesize: filesize ?? this.filesize,
       isOriginal: isOriginal ?? this.isOriginal,
       httpHeaders: Map<String, String>.unmodifiable(
@@ -59,6 +69,8 @@ class AudioTrack {
       'label': label,
       'url': url,
       'ext': ext,
+      'codec': codec,
+      'bitrateKbps': bitrateKbps,
       'filesize': filesize,
       'isOriginal': isOriginal,
       'httpHeaders': httpHeaders,
@@ -73,6 +85,8 @@ class AudioTrack {
       label: json['label']?.toString() ?? '',
       url: json['url']?.toString() ?? '',
       ext: json['ext']?.toString() ?? 'm4a',
+      codec: json['codec']?.toString() ?? '',
+      bitrateKbps: _toInt(json['bitrateKbps']),
       filesize: _toInt(json['filesize']),
       isOriginal: json['isOriginal'] == true,
       httpHeaders: _toStringMap(json['httpHeaders']),
@@ -106,6 +120,8 @@ class AudioTrack {
         other.label == label &&
         other.url == url &&
         other.ext == ext &&
+        other.codec == codec &&
+        other.bitrateKbps == bitrateKbps &&
         other.filesize == filesize &&
         other.isOriginal == isOriginal &&
         mapEquals(other.httpHeaders, httpHeaders);
@@ -119,6 +135,8 @@ class AudioTrack {
     label,
     url,
     ext,
+    codec,
+    bitrateKbps,
     filesize,
     isOriginal,
     Object.hashAllUnordered(

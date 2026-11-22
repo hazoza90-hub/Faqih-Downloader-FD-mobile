@@ -9,6 +9,10 @@ abstract final class AppConstants {
   static const int defaultMaxConnections = 6;
   static const int maxConnectionsLimit = 16;
 
+  static const int minConcurrentDownloads = 1;
+  static const int defaultMaxConcurrentDownloads = 3;
+  static const int maxConcurrentDownloadsLimit = 5;
+
   static const int defaultMinSplitBytes = 128 * 1024;
   static const int defaultBufferBytes = 64 * 1024;
 
@@ -32,6 +36,16 @@ abstract final class AppConstants {
     }
     if (value > maxConnectionsLimit) {
       return maxConnectionsLimit;
+    }
+    return value;
+  }
+
+  static int clampConcurrentDownloads(int value) {
+    if (value < minConcurrentDownloads) {
+      return minConcurrentDownloads;
+    }
+    if (value > maxConcurrentDownloadsLimit) {
+      return maxConcurrentDownloadsLimit;
     }
     return value;
   }

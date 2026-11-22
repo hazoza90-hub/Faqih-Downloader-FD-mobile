@@ -17,6 +17,8 @@ class VideoFormatOption {
     this.filesizeApprox = 0,
     this.vcodec = '',
     this.acodec = '',
+    this.protocol = '',
+    this.tbrKbps = 0.0,
     this.isProgressive = false,
     this.isAudioOnly = false,
     this.videoUrl = '',
@@ -40,6 +42,8 @@ class VideoFormatOption {
   final int filesizeApprox;
   final String vcodec;
   final String acodec;
+  final String protocol;
+  final double tbrKbps;
   final bool isProgressive;
   final bool isAudioOnly;
   final String videoUrl;
@@ -53,6 +57,34 @@ class VideoFormatOption {
   final SubtitleTrack? selectedSubtitleTrack;
   final ClipRange? clipRange;
 
+  bool get needsAudioMerge => !isProgressive && !isAudioOnly;
+
+  bool get isHlsOrDash {
+    final proto = protocol.toLowerCase();
+    if (proto.contains('m3u8') ||
+        proto.contains('hls') ||
+        proto.contains('dash') ||
+        proto.contains('f4m')) {
+      return true;
+    }
+    return _isManifestUrl(videoUrl) ||
+        (audioUrl != null && _isManifestUrl(audioUrl!));
+  }
+
+  bool get isDirectTurboSupported {
+    if (isHlsOrDash) return false;
+    final primaryUrl = isAudioOnly ? (audioUrl ?? videoUrl) : videoUrl;
+    return primaryUrl.trim().isNotEmpty;
+  }
+
+  static bool _isManifestUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('.m3u8') ||
+        lower.contains('.mpd') ||
+        lower.contains('/manifest/hls') ||
+        lower.contains('/manifest/dash');
+  }
+
   VideoFormatOption copyWith({
     String? formatId,
     String? resolutionLabel,
@@ -63,6 +95,8 @@ class VideoFormatOption {
     int? filesizeApprox,
     String? vcodec,
     String? acodec,
+    String? protocol,
+    double? tbrKbps,
     bool? isProgressive,
     bool? isAudioOnly,
     String? videoUrl,
@@ -90,6 +124,8 @@ class VideoFormatOption {
       filesizeApprox: filesizeApprox ?? this.filesizeApprox,
       vcodec: vcodec ?? this.vcodec,
       acodec: acodec ?? this.acodec,
+      protocol: protocol ?? this.protocol,
+      tbrKbps: tbrKbps ?? this.tbrKbps,
       isProgressive: isProgressive ?? this.isProgressive,
       isAudioOnly: isAudioOnly ?? this.isAudioOnly,
       videoUrl: videoUrl ?? this.videoUrl,
@@ -124,6 +160,8 @@ class VideoFormatOption {
       'filesizeApprox': filesizeApprox,
       'vcodec': vcodec,
       'acodec': acodec,
+      'protocol': protocol,
+      'tbrKbps': tbrKbps,
       'isProgressive': isProgressive,
       'isAudioOnly': isAudioOnly,
       'videoUrl': videoUrl,
@@ -150,6 +188,8 @@ class VideoFormatOption {
       filesizeApprox: _toInt(json['filesizeApprox']),
       vcodec: json['vcodec']?.toString() ?? '',
       acodec: json['acodec']?.toString() ?? '',
+      protocol: json['protocol']?.toString() ?? '',
+      tbrKbps: _toDouble(json['tbrKbps']),
       isProgressive: json['isProgressive'] == true,
       isAudioOnly: json['isAudioOnly'] == true,
       videoUrl: json['videoUrl']?.toString() ?? '',
@@ -184,6 +224,13 @@ class VideoFormatOption {
     return fallback;
   }
 
+  static double _toDouble(Object? raw, {double fallback = 0.0}) {
+    if (raw is double) return raw;
+    if (raw is num) return raw.toDouble();
+    if (raw is String) return double.tryParse(raw.trim()) ?? fallback;
+    return fallback;
+  }
+
   static Map<String, String> _toStringMap(Object? raw) {
     if (raw is! Map) return const <String, String>{};
     return Map<String, String>.unmodifiable(<String, String>{
@@ -205,6 +252,8 @@ class VideoFormatOption {
         other.filesizeApprox == filesizeApprox &&
         other.vcodec == vcodec &&
         other.acodec == acodec &&
+        other.protocol == protocol &&
+        other.tbrKbps == tbrKbps &&
         other.isProgressive == isProgressive &&
         other.isAudioOnly == isAudioOnly &&
         other.videoUrl == videoUrl &&
@@ -221,30 +270,11 @@ class VideoFormatOption {
 
   @override
   int get hashCode => Object.hashAll(<Object?>[
-    formatId,
-    resolutionLabel,
-    height,
-    width,
-    fps,
-    ext,
-    filesizeApprox,
-    vcodec,
-    acodec,
-    isProgressive,
-    isAudioOnly,
-    videoUrl,
-    Object.hashAllUnordered(
-      videoHeaders.entries.map((e) => Object.hash(e.key, e.value)),
-    ),
+    formatId, resolutionLabel, height, width, fps, ext, filesizeApprox,
+    vcodec, acodec, protocol, tbrKbps, isProgressive, isAudioOnly, videoUrl,
+    Object.hashAllUnordered(videoHeaders.entries.map((e) => Object.hash(e.key, e.value))),
     audioUrl,
-    Object.hashAllUnordered(
-      audioHeaders.entries.map((e) => Object.hash(e.key, e.value)),
-    ),
-    audioExt,
-    audioSize,
-    note,
-    selectedAudioTrack,
-    selectedSubtitleTrack,
-    clipRange,
+    Object.hashAllUnordered(audioHeaders.entries.map((e) => Object.hash(e.key, e.value))),
+    audioExt, audioSize, note, selectedAudioTrack, selectedSubtitleTrack, clipRange,
   ]);
 }

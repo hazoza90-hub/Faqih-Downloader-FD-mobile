@@ -19,6 +19,11 @@ String classifyCategory(String filename) {
   return 'Other';
 }
 
+/// Namespaced facade for [classifyCategory].
+abstract final class CategoryClassifier {
+  static String classify(String filename) => classifyCategory(filename);
+}
+
 const Set<String> _videoExts = <String>{
   'mp4',
   'mkv',

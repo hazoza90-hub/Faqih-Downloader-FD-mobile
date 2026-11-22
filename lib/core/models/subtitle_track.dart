@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+typedef SubtitleTrackOption = SubtitleTrack;
+
 /// Selectable built-in or external subtitle track for video downloads.
 @immutable
 class SubtitleTrack {

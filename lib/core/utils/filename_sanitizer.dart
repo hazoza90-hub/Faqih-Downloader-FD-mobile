@@ -77,6 +77,26 @@ String sanitizeFilename(
   return '$base$fullSuffix';
 }
 
+/// Namespaced facade for [sanitizeFilename].
+abstract final class FilenameSanitizer {
+  static String sanitize(
+    String name, {
+    int maxLength = 180,
+    bool isClip = false,
+    bool hasSub = false,
+    bool hasDub = false,
+    String fallback = 'download',
+  }) =>
+      sanitizeFilename(
+        name,
+        maxLength: maxLength,
+        isClip: isClip,
+        hasSub: hasSub,
+        hasDub: hasDub,
+        fallback: fallback,
+      );
+}
+
 String _safeUtf16Substring(String value, int maxUnits) {
   if (maxUnits <= 0 || value.isEmpty) {
     return '';
