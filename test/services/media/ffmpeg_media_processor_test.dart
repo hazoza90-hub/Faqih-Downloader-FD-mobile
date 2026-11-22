@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:faqih_downloader_mobile/core/models/clip_range.dart';
 import 'package:faqih_downloader_mobile/platform/channel_names.dart';
 import 'package:faqih_downloader_mobile/platform/youtube_dl_channel.dart';
+import 'package:faqih_downloader_mobile/services/coordinator/download_job_models.dart';
+import 'package:faqih_downloader_mobile/services/coordinator/ytdlp_stream_downloader.dart';
 import 'package:faqih_downloader_mobile/services/media/ffmpeg_media_processor.dart';
 import 'package:faqih_downloader_mobile/services/media/ffmpeg_progress_parser.dart';
 import 'package:faqih_downloader_mobile/services/media/media_exceptions.dart';
@@ -212,6 +214,34 @@ void main() {
       expect(midVf, contains('FontSize=32'));
 
       expect(FfmpegMediaProcessor.assAlignmentForPosition('bottom'), 2);
+    });
+
+    test('YtDlpStreamDownloader.buildSelector honors preferredVideoHeight and forceMediaPipeline', () {
+      const req720 = DownloadJobRequest(
+        id: 'pl_1',
+        url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        title: 'Episode 1',
+        forceMediaPipeline: true,
+        preferredVideoHeight: 720,
+      );
+      expect(req720.isMediaJob, isTrue);
+      expect(
+        YtDlpStreamDownloader.buildSelector(req720, null, null),
+        'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+      );
+
+      const reqBest = DownloadJobRequest(
+        id: 'pl_2',
+        url: 'https://cdn.example.com/custom',
+        title: 'Custom Media',
+        forceMediaPipeline: true,
+        preferredVideoHeight: 0,
+      );
+      expect(reqBest.isMediaJob, isTrue);
+      expect(
+        YtDlpStreamDownloader.buildSelector(reqBest, null, null),
+        'bestvideo+bestaudio/best',
+      );
     });
   });
 }

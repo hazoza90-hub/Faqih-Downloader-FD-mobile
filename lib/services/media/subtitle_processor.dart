@@ -25,7 +25,9 @@ class SubtitleProcessor {
         ? convertVttToSrt(rawText)
         : deduplicateRollingCaptions(rawText);
 
-    if (prepareForArabicHardBurn || isArabicLanguage(track.language)) {
+    if (prepareForArabicHardBurn ||
+        isArabicLanguage(track.language) ||
+        RegExp(r'[\u0600-\u06FF]').hasMatch(srt)) {
       srt = normalizeForArabicRtl(srt);
     }
 
@@ -45,7 +47,8 @@ class SubtitleProcessor {
     if (local != null && local.isNotEmpty) {
       final file = File(local);
       if (file.existsSync()) {
-        return file.readAsString(encoding: utf8);
+        final bytes = await file.readAsBytes();
+        return utf8.decode(bytes, allowMalformed: true);
       }
     }
 

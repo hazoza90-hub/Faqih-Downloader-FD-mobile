@@ -56,9 +56,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
         if (!mounted) return;
         _urlController.text = url;
         _sniffer?.markSeen(url);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}))),
-        );
+        _showSnack(ScaffoldMessenger.of(context), widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}));
         unawaited(_analyzeAndRoute(url));
       });
       _sniffer = ClipboardSnifferService(
@@ -92,8 +90,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     final text = data?.text?.trim() ?? '';
     if (!mounted) return;
     final tr = widget.translator.tr;
+    final messenger = ScaffoldMessenger.of(context);
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('msg_clipboard_empty'))));
+      _showSnack(messenger, tr('msg_clipboard_empty'));
       return;
     }
     final urls = UrlDetector.extractUrls(text);
@@ -103,7 +102,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     }
     _urlController.text = text;
     if (urls.length == 1) _sniffer?.markSeen(urls.first);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('msg_pasted'))));
+    _showSnack(messenger, tr('msg_pasted'));
   }
 
   void _stageMultipleUrls(List<String> urls) {
@@ -117,15 +116,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       _snifferBannerUrl = null;
       _selectedTabIndex = 0;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          widget.translator.tr(
-            'msg_multi_urls_staged',
-            params: <String, String>{'count': '${added > 0 ? added : urls.length}'},
-          ),
-        ),
-      ),
+    _showSnack(
+      ScaffoldMessenger.of(context),
+      widget.translator.tr('msg_multi_urls_staged', params: <String, String>{'count': '${added > 0 ? added : urls.length}'}),
     );
   }
 
@@ -169,6 +162,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     await _analyzeAndRoute(url);
   }
 
+  void _showSnack(ScaffoldMessengerState messenger, String msg) =>
+      messenger.showSnackBar(SnackBar(content: Text(msg)));
+
   Future<void> _analyzeAndRoute(String url) async {
     final ctrl = widget.controller;
     if (ctrl == null) return;
@@ -186,17 +182,20 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
             isScrollControlled: true,
             builder: (_) => PlaylistPickerSheet(playlistInfo: info, translator: widget.translator),
           );
-          if (!mounted || pick == null || pick.selectedUrls.isEmpty) return;
+          if (!mounted || pick == null || pick.selectedItems.isEmpty) return;
           if (pick.action == PlaylistSheetAction.stageSelected) {
             ctrl.stageUrls(pick.selectedUrls);
             setState(() => _selectedTabIndex = 0);
-            messenger.showSnackBar(SnackBar(content: Text(tr('msg_playlist_staged', params: <String, String>{'count': '${pick.selectedUrls.length}'}))));
+            _showSnack(messenger, tr('msg_playlist_staged', params: <String, String>{'count': '${pick.selectedUrls.length}'}));
           } else {
-            for (final u in pick.selectedUrls) {
-              ctrl.enqueueDirectDownload(u);
+            for (final item in pick.selectedItems) {
+              final u = item.webpageUrl.isNotEmpty ? item.webpageUrl : item.videoUrl;
+              if (u.isNotEmpty) {
+                ctrl.enqueueSmartDownload(u, customTitle: item.title, durationSec: item.durationSec);
+              }
             }
             setState(() => _selectedTabIndex = 1);
-            messenger.showSnackBar(SnackBar(content: Text(tr('msg_playlist_queued', params: <String, String>{'count': '${pick.selectedUrls.length}'}))));
+            _showSnack(messenger, tr('msg_playlist_queued', params: <String, String>{'count': '${pick.selectedItems.length}'}));
           }
           return;
         }
@@ -308,7 +307,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
                       stagedUrls: staged,
                       onAnalyzeUrl: _analyzeAndRoute,
                       onStartUrl: (u) {
-                        ctrl?.enqueueDirectDownload(u);
+                        ctrl?.enqueueSmartDownload(u);
                         setState(() => _selectedTabIndex = 1);
                       },
                       onRemoveUrl: (u) {
@@ -337,17 +336,25 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
                       entries: vaultEntries,
                       onOpenEntry: (e) async {
                         final messenger = ScaffoldMessenger.of(context);
-                        final ok = await ctrl?.openVaultEntry(e) ?? false;
-                        if (!mounted) return;
-                        messenger.showSnackBar(
-                          SnackBar(content: Text(ok ? tr('msg_file_opened') : tr('msg_open_failed', params: const <String, String>{'err': ''}))),
-                        );
+                        try {
+                          final ok = await ctrl?.openVaultEntry(e) ?? false;
+                          if (!mounted) return;
+                          _showSnack(messenger, ok ? tr('msg_file_opened') : tr('msg_open_failed', params: const <String, String>{'err': ''}));
+                        } catch (err) {
+                          if (!mounted) return;
+                          _showSnack(messenger, tr('msg_open_failed', params: <String, String>{'err': '$err'}));
+                        }
                       },
                       onShareEntry: (e) async {
                         final messenger = ScaffoldMessenger.of(context);
-                        final ok = await ctrl?.shareVaultEntry(e) ?? false;
-                        if (!ok && mounted) {
-                          messenger.showSnackBar(SnackBar(content: Text(tr('msg_share_failed', params: const <String, String>{'err': ''}))));
+                        try {
+                          final ok = await ctrl?.shareVaultEntry(e) ?? false;
+                          if (!ok && mounted) {
+                            _showSnack(messenger, tr('msg_share_failed', params: const <String, String>{'err': ''}));
+                          }
+                        } catch (err) {
+                          if (!mounted) return;
+                          _showSnack(messenger, tr('msg_share_failed', params: <String, String>{'err': '$err'}));
                         }
                       },
                       onRetryEntry: (e) => unawaited(_analyzeAndRoute(e.url)),

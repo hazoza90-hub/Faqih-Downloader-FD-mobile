@@ -171,6 +171,7 @@ const Map<String, String> stringsEn = <String, String>{
   'btn_reset_save_dir': 'Reset Default',
   'msg_save_dir_updated': 'Save folder set to: {path}',
   'msg_save_dir_reset': 'Save folder reset to default.',
+  'msg_save_dir_failed': 'Could not select save folder: {err}',
   'btn_share': 'Share',
   'btn_copy_path': 'Copy Path',
   'msg_path_copied': 'File path copied.',

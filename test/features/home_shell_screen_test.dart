@@ -271,4 +271,70 @@ void main() {
 
     controller.dispose();
   });
+
+  test('AppController.enqueueSmartDownload and startAllStaged route media URLs with forceMediaPipeline', () async {
+    final capturedRequests = <DownloadJobRequest>[];
+    final repo = await SettingsRepository.create();
+    await repo.save(repo.load().copyWith(preferredVideoHeight: 720));
+
+    final queue = DownloadQueueManager(
+      foregroundService: ForegroundServiceChannel(
+        methodChannel: fgMethod,
+        eventChannel: fgEvents,
+      ),
+      coordinatorFactory: (req, {required onStateChanged}) {
+        capturedRequests.add(req);
+        return _TestCoordinator(
+          request: req,
+          emit: onStateChanged,
+          mediaChannel: mediaMethod,
+        );
+      },
+    );
+
+    final controller = AppController(
+      translator: AppTranslator(initialLanguage: 'en', repository: repo),
+      settingsRepository: repo,
+      historyManager: DownloadHistoryManager(
+        storage: HistoryStorage(p.join(tempDir.path, 'history_smart.json')),
+      ),
+      queueManager: queue,
+      mediaStoreChannel: MediaStoreChannel(methodChannel: mediaMethod),
+      foregroundServiceChannel: ForegroundServiceChannel(
+        methodChannel: fgMethod,
+        eventChannel: fgEvents,
+      ),
+      autoInitNative: false,
+    );
+    await controller.initialize();
+
+    controller.enqueueSmartDownload(
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      customTitle: 'Playlist Ep 1',
+      durationSec: 212,
+    );
+    controller.stageUrl('https://www.tiktok.com/@user/video/7234567890123456789');
+    controller.stageUrl('https://cdn.example.com/archive.zip');
+    await controller.startAllStaged();
+
+    expect(capturedRequests.length, 3);
+    final ytReq = capturedRequests[0];
+    final ttReq = capturedRequests.firstWhere((r) => r.url.contains('tiktok.com'));
+    final directReq = capturedRequests.firstWhere((r) => r.url.contains('archive.zip'));
+
+    expect(ytReq.forceMediaPipeline, isTrue);
+    expect(ytReq.isMediaJob, isTrue);
+    expect(ytReq.preferredVideoHeight, 720);
+    expect(ytReq.title, 'Playlist Ep 1');
+    expect(ytReq.durationSec, 212);
+
+    expect(ttReq.forceMediaPipeline, isTrue);
+    expect(ttReq.isMediaJob, isTrue);
+
+    expect(directReq.forceMediaPipeline, isFalse);
+    expect(directReq.isMediaJob, isFalse);
+
+    await queue.cancelAll();
+    controller.dispose();
+  });
 }

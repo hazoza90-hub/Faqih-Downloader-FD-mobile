@@ -154,6 +154,38 @@ After clip window
         if (tempDir.existsSync()) await tempDir.delete(recursive: true);
       }
     });
+
+    test('downloadAndNormalize handles local und Arabic subtitle with malformed UTF-8 bytes', () async {
+      final tempDir = await Directory.systemTemp.createTemp('fd_ext_sub_');
+      try {
+        final rawPath = p.join(tempDir.path, 'custom.srt');
+        final outPath = p.join(tempDir.path, 'normalized.srt');
+        final arabicBytes = '1\n00:00:01,000 --> 00:00:03,000\nمرحبا بالعالم\n'.codeUnits;
+        final validUtf8Arabic = await File(rawPath).writeAsString(
+          String.fromCharCodes(arabicBytes),
+          flush: true,
+        );
+        final existing = validUtf8Arabic.readAsBytesSync();
+        await File(rawPath).writeAsBytes(<int>[...existing, 0xFF, 0xFE], flush: true);
+
+        final processor = SubtitleProcessor();
+        await processor.downloadAndNormalize(
+          SubtitleTrack(
+            subId: 'ext_1',
+            language: 'und',
+            label: 'custom.srt',
+            url: rawPath,
+            localPath: rawPath,
+            isExternal: true,
+          ),
+          outPath,
+        );
+        final result = await File(outPath).readAsString();
+        expect(result, contains('\u202Bمرحبا بالعالم\u202C'));
+      } finally {
+        if (tempDir.existsSync()) await tempDir.delete(recursive: true);
+      }
+    });
   });
 }
 

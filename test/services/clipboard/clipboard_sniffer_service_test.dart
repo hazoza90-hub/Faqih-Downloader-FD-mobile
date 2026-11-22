@@ -15,6 +15,7 @@ void main() {
         onUrlDetected: (u) => detected.add(u),
         clipboardReader: () async => clipboardText,
         observeLifecycle: false,
+        resumeDelay: Duration.zero,
       );
 
       // 1. First read detects YouTube URL:
@@ -48,7 +49,8 @@ void main() {
         onUrlDetected: (u) => detected.add(u),
         clipboardReader: () async => clipboardText,
         observeLifecycle: false,
-      );
+        resumeDelay: Duration.zero,
+      )..start(checkImmediately: false);
 
       // YouTube disabled -> suppressed:
       expect(await sniffer.checkClipboard(), isNull);
@@ -64,6 +66,50 @@ void main() {
       sniffer.didChangeAppLifecycleState(AppLifecycleState.resumed);
       await Future<void>.delayed(Duration.zero);
       expect(detected, ['https://www.tiktok.com/@creator/video/7234567890123456789']);
+      sniffer.dispose();
+    });
+
+    test('waits resumeDelay before reading clipboard and cancels if disposed mid-delay', () async {
+      var readCount = 0;
+      final detected = <String>[];
+      final sniffer = ClipboardSnifferService(
+        settingsProvider: () => const AppSettings(),
+        onUrlDetected: (u) => detected.add(u),
+        clipboardReader: () async {
+          readCount++;
+          return 'https://youtu.be/dQw4w9WgXcQ';
+        },
+        observeLifecycle: false,
+        resumeDelay: const Duration(milliseconds: 60),
+      )..start(checkImmediately: false);
+
+      // 1. Trigger resume and dispose before delay elapses -> aborted cleanly:
+      sniffer.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(const Duration(milliseconds: 15));
+      expect(readCount, 0);
+      sniffer.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 70));
+      expect(readCount, 0);
+      expect(detected, isEmpty);
+
+      // 2. Active instance waits resumeDelay then reads once:
+      final activeSniffer = ClipboardSnifferService(
+        settingsProvider: () => const AppSettings(),
+        onUrlDetected: (u) => detected.add(u),
+        clipboardReader: () async {
+          readCount++;
+          return 'https://youtu.be/dQw4w9WgXcQ';
+        },
+        observeLifecycle: false,
+        resumeDelay: const Duration(milliseconds: 40),
+      )..start(checkImmediately: false);
+      activeSniffer.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(readCount, 0);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(readCount, 1);
+      expect(detected, ['https://youtu.be/dQw4w9WgXcQ']);
+      activeSniffer.dispose();
     });
   });
 }

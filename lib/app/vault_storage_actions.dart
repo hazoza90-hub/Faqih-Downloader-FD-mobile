@@ -1,29 +1,60 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/config/app_settings.dart';
 import '../core/models/history_entry.dart';
 import '../core/models/subtitle_track.dart';
+import '../core/models/youtube_stream_info.dart';
+import '../platform/cookies_channel.dart';
 import '../platform/media_store_channel.dart';
 import '../services/coordinator/job_export_helper.dart';
 import '../services/history/history_manager.dart';
 
-/// Encapsulates vault open/share/delete, SAF directory selection, external subtitles, and notif permission.
+/// Result returned when analyzing a user URL (either direct HTTP or rich media info).
+@immutable
+class UrlAnalysisResult {
+  const UrlAnalysisResult({required this.url, this.mediaInfo});
+  final String url;
+  final YouTubeStreamInfo? mediaInfo;
+  bool get isMedia => mediaInfo != null;
+}
+
+/// Encapsulates vault open/share/delete, SAF directory selection, cookies, external subtitles, and permissions.
 class VaultStorageActions {
   VaultStorageActions({
     required MediaStoreChannel mediaStore,
+    required CookiesChannel cookies,
     required DownloadHistoryManager? Function() historyProvider,
     required AppSettings Function() settingsProvider,
     required Future<void> Function(AppSettings next) saveSettings,
   })  : _mediaStore = mediaStore,
+        _cookies = cookies,
         _historyProvider = historyProvider,
         _settingsProvider = settingsProvider,
         _saveSettings = saveSettings;
 
   final MediaStoreChannel _mediaStore;
+  final CookiesChannel _cookies;
   final DownloadHistoryManager? Function() _historyProvider;
   final AppSettings Function() _settingsProvider;
   final Future<void> Function(AppSettings next) _saveSettings;
   bool _notifRequested = false;
+
+  Future<int> saveWebViewCookies(List<String> urls) async {
+    final workDir = await _mediaStore.getAppWorkDir();
+    final cookiesPath = p.join(workDir, 'cookies.txt');
+    final count = await _cookies.exportCookiesForUrls(urls: urls, outputPath: cookiesPath);
+    if (count > 0) {
+      await _saveSettings(_settingsProvider().copyWith(cookiesFilePath: cookiesPath));
+    }
+    return count;
+  }
+
+  Future<void> clearCookies() async {
+    final path = _settingsProvider().cookiesFilePath;
+    await _cookies.clearAllCookies(cookiesFilePath: path.isEmpty ? null : path);
+    await _saveSettings(_settingsProvider().copyWith(cookiesFilePath: ''));
+  }
 
   String resolveTarget(HistoryEntry entry) =>
       (entry.contentUri != null && entry.contentUri!.trim().isNotEmpty)
@@ -67,7 +98,11 @@ class VaultStorageActions {
     final picked = await _mediaStore.pickSubtitleFile();
     if (picked == null) return null;
     final ext = p.extension(picked.name).replaceFirst('.', '').toLowerCase();
-    final lang = picked.name.toLowerCase().contains('ar') ? 'ar' : 'ext';
+    final isAr = RegExp(
+      r'(?:^|[._\-\s])(ar|ara|arabic)(?:$|[._\-\s])',
+      caseSensitive: false,
+    ).hasMatch(picked.name);
+    final lang = isAr ? 'ar' : 'und';
     return SubtitleTrack(
       subId: 'ext_${DateTime.now().millisecondsSinceEpoch}',
       language: lang,

@@ -171,6 +171,7 @@ const Map<String, String> stringsAr = <String, String>{
   'btn_reset_save_dir': 'إعادة للافتراضي',
   'msg_save_dir_updated': 'تم تعيين مجلد الحفظ: {path}',
   'msg_save_dir_reset': 'تمت إعادة مجلد الحفظ إلى الافتراضي.',
+  'msg_save_dir_failed': 'تعذّر اختيار مجلد الحفظ: {err}',
   'btn_share': 'مشاركة',
   'btn_copy_path': 'نسخ المسار',
   'msg_path_copied': 'تم نسخ مسار الملف.',

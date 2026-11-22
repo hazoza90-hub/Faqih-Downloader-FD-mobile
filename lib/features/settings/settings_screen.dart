@@ -221,14 +221,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: (next) => widget.controller.updateSettings(next),
                 onPickSaveDir: () async {
                   final messenger = ScaffoldMessenger.of(context);
-                  final ok = await widget.controller.pickCustomSaveDirectory();
-                  if (ok && context.mounted) {
-                    _showSnack(
-                      messenger,
-                      tr('msg_save_dir_updated', params: <String, String>{
-                        'path': widget.controller.settings.customSaveDisplayLabel,
-                      }),
-                    );
+                  try {
+                    final ok = await widget.controller.pickCustomSaveDirectory();
+                    if (ok && context.mounted) {
+                      _showSnack(
+                        messenger,
+                        tr('msg_save_dir_updated', params: <String, String>{
+                          'path': widget.controller.settings.customSaveDisplayLabel,
+                        }),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      _showSnack(messenger, tr('msg_save_dir_failed', params: <String, String>{'err': '$e'}));
+                    }
                   }
                 },
                 onResetSaveDir: () async {

@@ -113,17 +113,28 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
   }
 
   Future<void> _pickExternalSubtitle() async {
-    final track = await widget.onPickExternalSubtitle?.call();
-    if (!mounted || track == null) return;
-    setState(() {
-      _subtitles.add(track);
-      _selectedSubtitle = track;
-      if (_subtitleMode == SubtitleMode.none) {
-        _subtitleMode = widget.settings?.subtitleEmbedMode == AppConstants.subtitleModeHardBurn
-            ? SubtitleMode.hardBurn
-            : SubtitleMode.softMux;
-      }
-    });
+    try {
+      final track = await widget.onPickExternalSubtitle?.call();
+      if (!mounted || track == null) return;
+      setState(() {
+        _subtitles.add(track);
+        _selectedSubtitle = track;
+        if (_subtitleMode == SubtitleMode.none) {
+          _subtitleMode = widget.settings?.subtitleEmbedMode == AppConstants.subtitleModeHardBurn
+              ? SubtitleMode.hardBurn
+              : SubtitleMode.softMux;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.translator.tr('msg_open_failed', params: <String, String>{'err': '$e'}),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _openClipper() async {

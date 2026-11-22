@@ -15,12 +15,14 @@ class ClipboardSnifferService with WidgetsBindingObserver {
     required this.onUrlDetected,
     ClipboardTextReader? clipboardReader,
     this.observeLifecycle = true,
+    this.resumeDelay = const Duration(milliseconds: 250),
   }) : _clipboardReader = clipboardReader ?? _defaultClipboardReader;
 
   final AppSettings Function() settingsProvider;
   final FutureOr<void> Function(String url) onUrlDetected;
   final ClipboardTextReader _clipboardReader;
   final bool observeLifecycle;
+  final Duration resumeDelay;
 
   bool _started = false;
   String? _lastSeenUrl;
@@ -53,8 +55,16 @@ class ClipboardSnifferService with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(checkClipboard());
+      unawaited(_checkAfterResumeDelay());
     }
+  }
+
+  Future<void> _checkAfterResumeDelay() async {
+    if (resumeDelay > Duration.zero) {
+      await Future<void>.delayed(resumeDelay);
+    }
+    if (!_started) return;
+    await checkClipboard();
   }
 
   Future<String?> checkClipboard() async {

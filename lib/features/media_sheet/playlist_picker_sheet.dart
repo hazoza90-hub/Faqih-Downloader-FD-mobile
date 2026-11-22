@@ -8,10 +8,15 @@ import '../../core/utils/size_formatter.dart';
 enum PlaylistSheetAction { stageSelected, downloadSelected }
 
 class PlaylistPickerResult {
-  const PlaylistPickerResult({required this.action, required this.selectedUrls});
+  const PlaylistPickerResult({required this.action, required this.selectedItems});
 
   final PlaylistSheetAction action;
-  final List<String> selectedUrls;
+  final List<YouTubeStreamInfo> selectedItems;
+
+  List<String> get selectedUrls => selectedItems
+      .map((e) => e.webpageUrl.isNotEmpty ? e.webpageUrl : e.videoUrl)
+      .where((u) => u.isNotEmpty)
+      .toList(growable: false);
 }
 
 /// Interactive BottomSheet for multi-selecting items from an extracted playlist.
@@ -40,17 +45,17 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet> {
     );
   }
 
-  List<String> get _selectedUrls {
+  List<YouTubeStreamInfo> get _selectedItems {
     final entries = widget.playlistInfo.playlistEntries;
-    final urls = <String>[];
+    final items = <YouTubeStreamInfo>[];
     for (var i = 0; i < entries.length; i++) {
       if (_selectedIndices.contains(i)) {
         final item = entries[i];
         final u = item.webpageUrl.isNotEmpty ? item.webpageUrl : item.videoUrl;
-        if (u.isNotEmpty) urls.add(u);
+        if (u.isNotEmpty) items.add(item);
       }
     }
-    return urls;
+    return items;
   }
 
   @override
@@ -154,7 +159,7 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet> {
                           : () => Navigator.of(context).pop(
                                 PlaylistPickerResult(
                                   action: PlaylistSheetAction.stageSelected,
-                                  selectedUrls: _selectedUrls,
+                                  selectedItems: _selectedItems,
                                 ),
                               ),
                       child: Text(tr('btn_stage_selected', params: <String, String>{'count': '$selectedCount'})),
@@ -169,7 +174,7 @@ class _PlaylistPickerSheetState extends State<PlaylistPickerSheet> {
                           : () => Navigator.of(context).pop(
                                 PlaylistPickerResult(
                                   action: PlaylistSheetAction.downloadSelected,
-                                  selectedUrls: _selectedUrls,
+                                  selectedItems: _selectedItems,
                                 ),
                               ),
                       child: Text(tr('btn_download_selected', params: <String, String>{'count': '$selectedCount'})),

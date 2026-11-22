@@ -119,6 +119,10 @@ class YtDlpStreamDownloader {
           : 'bestaudio';
       return '${fmt.formatId}+$aId/best';
     }
+    if (request.preferredVideoHeight > 0) {
+      return 'bestvideo[height<=${request.preferredVideoHeight}]+bestaudio/'
+          'best[height<=${request.preferredVideoHeight}]/best';
+    }
     return 'bestvideo+bestaudio/best';
   }
 

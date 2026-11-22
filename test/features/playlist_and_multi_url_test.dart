@@ -77,6 +77,8 @@ void main() {
     expect(captured, isNotNull);
     expect(captured!.action, PlaylistSheetAction.stageSelected);
     expect(captured!.selectedUrls, ['https://www.youtube.com/watch?v=bbbbbbbbbbb']);
+    expect(captured!.selectedItems.single.title, 'Episode 2');
+    expect(captured!.selectedItems.single.durationSec, 240);
   });
 
   testWidgets('HomeShellScreen stages multi-URL batch paste cleanly into Staged tab', (tester) async {

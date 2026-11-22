@@ -10,7 +10,6 @@ import '../core/config/settings_repository.dart';
 import '../core/i18n/translator.dart';
 import '../core/models/history_entry.dart';
 import '../core/models/subtitle_track.dart';
-import '../core/models/youtube_stream_info.dart';
 import '../core/utils/filename_sanitizer.dart';
 import '../core/utils/url_detector.dart';
 import '../platform/cookies_channel.dart';
@@ -29,14 +28,7 @@ import '../services/media/media_extractor_service.dart';
 import '../services/updater/github_release_updater.dart';
 import 'vault_storage_actions.dart';
 
-/// Result returned when analyzing a user URL (either direct HTTP or rich media info).
-@immutable
-class UrlAnalysisResult {
-  const UrlAnalysisResult({required this.url, this.mediaInfo});
-  final String url;
-  final YouTubeStreamInfo? mediaInfo;
-  bool get isMedia => mediaInfo != null;
-}
+export 'vault_storage_actions.dart' show UrlAnalysisResult;
 
 /// Central controller wiring settings, history, queue manager, native bridges, and UI.
 class AppController extends ChangeNotifier {
@@ -97,6 +89,7 @@ class AppController extends ChangeNotifier {
 
   late final VaultStorageActions _vaultActions = VaultStorageActions(
     mediaStore: _mediaStore,
+    cookies: _cookies,
     historyProvider: () => _history,
     settingsProvider: () => _settings,
     saveSettings: updateSettings,
@@ -251,13 +244,41 @@ class AppController extends ChangeNotifier {
     _stagedUrls.clear();
     notifyListeners();
     for (final url in copy) {
-      enqueueDirectDownload(url);
+      enqueueSmartDownload(url);
     }
   }
 
-  DownloadJobState enqueueDirectDownload(String url, {String? customTitle}) {
+  DownloadJobState enqueueSmartDownload(
+    String url, {
+    String? customTitle,
+    int durationSec = 0,
+  }) {
+    if (!UrlDetector.isMediaUrl(url)) {
+      return enqueueDirectDownload(url, customTitle: customTitle);
+    }
+    return _enqueueBasicRequest(
+      url,
+      customTitle: customTitle,
+      durationSec: durationSec,
+      forceMediaPipeline: true,
+      preferredVideoHeight: _settings.preferredVideoHeight,
+    );
+  }
+
+  DownloadJobState enqueueDirectDownload(String url, {String? customTitle}) =>
+      _enqueueBasicRequest(url, customTitle: customTitle);
+
+  DownloadJobState _enqueueBasicRequest(
+    String url, {
+    String? customTitle,
+    int durationSec = 0,
+    bool forceMediaPipeline = false,
+    int preferredVideoHeight = 0,
+  }) {
+    final trimmed = url.trim();
+    _stagedUrls.remove(trimmed);
     _stagedUrls.remove(url);
-    final uri = Uri.tryParse(url.trim());
+    final uri = Uri.tryParse(trimmed);
     final rawName = (customTitle?.trim().isNotEmpty ?? false)
         ? customTitle!.trim()
         : (uri != null && uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download');
@@ -265,16 +286,20 @@ class AppController extends ChangeNotifier {
     final id = 'job_${DateTime.now().millisecondsSinceEpoch}_${++_jobCounter}';
     final req = DownloadJobRequest(
       id: id,
-      url: url.trim(),
+      url: trimmed,
       title: safeTitle,
       maxConnections: _settings.maxConnections,
       speedLimitBytesPerSec: _settings.speedLimitBytesPerSec,
       cookiesFile: _effectiveCookiesFile(),
-      platform: UrlDetector.extractMediaPlatform(url) ?? 'Direct',
+      platform: UrlDetector.extractMediaPlatform(trimmed) ??
+          (forceMediaPipeline ? 'Media' : 'Direct'),
+      durationSec: durationSec,
       customSaveTreeUri: _settings.customSaveTreeUri,
       autoCategorizeFolders: _settings.autoCategorizeFolders,
       subtitlePosition: _settings.subtitlePosition,
       subtitleFontSize: _settings.subtitleFontSize,
+      forceMediaPipeline: forceMediaPipeline,
+      preferredVideoHeight: preferredVideoHeight,
     );
     return _queue!.enqueue(req);
   }
@@ -332,24 +357,8 @@ class AppController extends ChangeNotifier {
     return res;
   }
 
-  Future<int> saveWebViewCookies(List<String> urls) async {
-    final workDir = await _mediaStore.getAppWorkDir();
-    final cookiesPath = p.join(workDir, 'cookies.txt');
-    final count = await _cookies.exportCookiesForUrls(
-      urls: urls,
-      outputPath: cookiesPath,
-    );
-    if (count > 0) {
-      await updateSettings(_settings.copyWith(cookiesFilePath: cookiesPath));
-    }
-    return count;
-  }
-
-  Future<void> clearCookies() async {
-    final path = _settings.cookiesFilePath;
-    await _cookies.clearAllCookies(cookiesFilePath: path.isEmpty ? null : path);
-    await updateSettings(_settings.copyWith(cookiesFilePath: ''));
-  }
+  Future<int> saveWebViewCookies(List<String> urls) => _vaultActions.saveWebViewCookies(urls);
+  Future<void> clearCookies() => _vaultActions.clearCookies();
 
   Future<bool> openVaultEntry(HistoryEntry entry) => _vaultActions.openEntry(entry);
   Future<bool> shareVaultEntry(HistoryEntry entry) => _vaultActions.shareEntry(entry);

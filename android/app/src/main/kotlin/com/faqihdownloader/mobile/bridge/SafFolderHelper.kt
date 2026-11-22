@@ -35,6 +35,22 @@ internal object SafFolderHelper {
         return segment.ifEmpty { "Custom Folder" }
     }
 
+    fun persistAndResolveWritableTree(appContext: Context, uri: Uri, rawFlags: Int): Map<String, String>? {
+        val rwMask = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val flags = (rawFlags and rwMask).takeIf { it != 0 } ?: rwMask
+        val persisted = runCatching {
+            appContext.contentResolver.takePersistableUriPermission(uri, flags)
+            true
+        }.getOrDefault(false)
+        if (!persisted) return null
+        val tree = runCatching { DocumentFile.fromTreeUri(appContext, uri) }.getOrNull()
+        if (tree == null || !tree.canWrite()) return null
+        return mapOf(
+            "treeUri" to uri.toString(),
+            "displayName" to resolveTreeDisplayName(appContext, uri),
+        )
+    }
+
     fun exportToTreeUri(
         appContext: Context,
         sourceFile: File,
@@ -79,7 +95,8 @@ internal object SafFolderHelper {
             runCatching { created.delete() }
             throw t
         }
-        val displayPath = if (cleanSub.isEmpty()) "$rootLabel/$uniqueName" else "$rootLabel/$cleanSub/$uniqueName"
+        val actualName = created.name?.takeIf { it.isNotBlank() } ?: uniqueName
+        val displayPath = if (cleanSub.isEmpty()) "$rootLabel/$actualName" else "$rootLabel/$cleanSub/$actualName"
         return mapOf(
             "uri" to created.uri.toString(),
             "displayPath" to displayPath,

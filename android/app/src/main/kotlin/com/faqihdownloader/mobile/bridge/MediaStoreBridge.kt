@@ -83,26 +83,18 @@ class MediaStoreBridge(
         if (requestCode == REQ_PICK_TREE) {
             val cb = pendingTreeResult ?: return false
             pendingTreeResult = null
-            if (resultCode != Activity.RESULT_OK || data?.data == null) {
-                cb.success(null)
-                return true
-            }
-            val uri = data.data!!
-            val flags = (data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
-                .takeIf { it != 0 } ?: (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            runCatching { appContext.contentResolver.takePersistableUriPermission(uri, flags) }
-            val name = SafFolderHelper.resolveTreeDisplayName(appContext, uri)
-            cb.success(mapOf("treeUri" to uri.toString(), "displayName" to name))
+            val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+            if (uri == null) { cb.success(null); return true }
+            val info = SafFolderHelper.persistAndResolveWritableTree(appContext, uri, data?.flags ?: 0)
+            if (info == null) cb.error("SAF_NOT_WRITABLE", "Selected folder is not writable", null)
+            else cb.success(info)
             return true
         }
         if (requestCode == REQ_PICK_SUBTITLE) {
             val cb = pendingSubResult ?: return false
             pendingSubResult = null
-            if (resultCode != Activity.RESULT_OK || data?.data == null) {
-                cb.success(null)
-                return true
-            }
-            val uri = data.data!!
+            val uri = if (resultCode == Activity.RESULT_OK) data?.data else null
+            if (uri == null) { cb.success(null); return true }
             scope.launch {
                 try {
                     val res = SafFolderHelper.copyPickedSubtitleToWorkDir(appContext, uri)
@@ -120,8 +112,7 @@ class MediaStoreBridge(
         if (requestCode != REQ_NOTIF_PERMISSION) return false
         val cb = pendingPermResult ?: return false
         pendingPermResult = null
-        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        cb.success(granted)
+        cb.success(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED)
         return true
     }
 
@@ -132,7 +123,10 @@ class MediaStoreBridge(
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
-        activity.startActivityForResult(intent, REQ_PICK_TREE)
+        try { activity.startActivityForResult(intent, REQ_PICK_TREE) } catch (t: Throwable) {
+            pendingTreeResult = null
+            result.error("PICKER_LAUNCH_ERROR", t.message ?: t.javaClass.simpleName, null)
+        }
     }
 
     private fun handlePickSubtitleFile(result: MethodChannel.Result) {
@@ -143,7 +137,10 @@ class MediaStoreBridge(
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
         }
-        activity.startActivityForResult(intent, REQ_PICK_SUBTITLE)
+        try { activity.startActivityForResult(intent, REQ_PICK_SUBTITLE) } catch (t: Throwable) {
+            pendingSubResult = null
+            result.error("PICKER_LAUNCH_ERROR", t.message ?: t.javaClass.simpleName, null)
+        }
     }
 
     private fun handleRequestNotifPermission(result: MethodChannel.Result) {

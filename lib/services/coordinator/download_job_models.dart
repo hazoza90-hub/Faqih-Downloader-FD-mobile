@@ -83,6 +83,8 @@ class DownloadJobRequest {
     this.autoCategorizeFolders = true,
     this.subtitlePosition = 'bottom',
     this.subtitleFontSize = 20,
+    this.forceMediaPipeline = false,
+    this.preferredVideoHeight = 0,
   });
 
   final String id;
@@ -106,16 +108,21 @@ class DownloadJobRequest {
   final bool autoCategorizeFolders;
   final String subtitlePosition;
   final int subtitleFontSize;
+  final bool forceMediaPipeline;
+  final int preferredVideoHeight;
 
   bool get isMediaJob =>
       selectedVideoFormat != null ||
       selectedAudioTrack != null ||
       audioOnly ||
+      forceMediaPipeline ||
       UrlDetector.isMediaUrl(url);
 
   DownloadJobRequest copyWith({
     int? speedLimitBytesPerSec,
     int? maxConnections,
+    bool? forceMediaPipeline,
+    int? preferredVideoHeight,
   }) {
     return DownloadJobRequest(
       id: id,
@@ -140,6 +147,8 @@ class DownloadJobRequest {
       autoCategorizeFolders: autoCategorizeFolders,
       subtitlePosition: subtitlePosition,
       subtitleFontSize: subtitleFontSize,
+      forceMediaPipeline: forceMediaPipeline ?? this.forceMediaPipeline,
+      preferredVideoHeight: preferredVideoHeight ?? this.preferredVideoHeight,
     );
   }
 }
