@@ -63,20 +63,33 @@ class ForegroundServiceBridge(private val appContext: Context) :
                     putExtra(DownloadForegroundService.EXTRA_BODY, call.argument<String>("body") ?: "Downloading...")
                     putExtra(DownloadForegroundService.EXTRA_PROGRESS, call.argument<Number>("progress")?.toInt() ?: 0)
                     putExtra(DownloadForegroundService.EXTRA_INDETERMINATE, call.argument<Boolean>("indeterminate") ?: true)
+                    call.argument<String>("pauseLabel")?.let {
+                        putExtra(DownloadForegroundService.EXTRA_PAUSE_LABEL, it)
+                    }
+                    call.argument<String>("cancelLabel")?.let {
+                        putExtra(DownloadForegroundService.EXTRA_CANCEL_LABEL, it)
+                    }
                 }
-                ContextCompat.startForegroundService(appContext, intent)
-                result.success(true)
+                try {
+                    ContextCompat.startForegroundService(appContext, intent)
+                    result.success(true)
+                } catch (t: Throwable) {
+                    result.error("FGS_START_ERROR", t.message ?: t.javaClass.simpleName, null)
+                }
             }
             "updateProgress" -> {
-                val intent = Intent(appContext, DownloadForegroundService::class.java).apply {
-                    action = DownloadForegroundService.ACTION_UPDATE
-                    putExtra(DownloadForegroundService.EXTRA_TITLE, call.argument<String>("title") ?: "Faqih Downloader")
-                    putExtra(DownloadForegroundService.EXTRA_BODY, call.argument<String>("body") ?: "Downloading...")
-                    putExtra(DownloadForegroundService.EXTRA_PROGRESS, call.argument<Number>("progress")?.toInt() ?: 0)
-                    putExtra(DownloadForegroundService.EXTRA_INDETERMINATE, call.argument<Boolean>("indeterminate") ?: false)
-                }
-                appContext.startService(intent)
-                result.success(true)
+                val updated = DownloadForegroundService.updateProgressIfRunning(
+                    context = appContext,
+                    title = call.argument<String>("title") ?: "Faqih Downloader",
+                    body = call.argument<String>("body") ?: "Downloading...",
+                    progress = call.argument<Number>("progress")?.toInt() ?: 0,
+                    indeterminate = call.argument<Boolean>("indeterminate") ?: false,
+                    pauseLabel = call.argument<String>("pauseLabel")
+                        ?: DownloadForegroundService.DEFAULT_PAUSE_LABEL,
+                    cancelLabel = call.argument<String>("cancelLabel")
+                        ?: DownloadForegroundService.DEFAULT_CANCEL_LABEL,
+                )
+                result.success(updated)
             }
             "showCompletedNotification" -> {
                 val title = call.argument<String>("title") ?: "Download Complete"
@@ -85,10 +98,7 @@ class ForegroundServiceBridge(private val appContext: Context) :
                 result.success(true)
             }
             "stopService" -> {
-                val intent = Intent(appContext, DownloadForegroundService::class.java).apply {
-                    action = DownloadForegroundService.ACTION_STOP
-                }
-                appContext.startService(intent)
+                appContext.stopService(Intent(appContext, DownloadForegroundService::class.java))
                 result.success(true)
             }
             else -> result.notImplemented()

@@ -21,6 +21,7 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     @Volatile
     private var eventSink: EventChannel.EventSink? = null
     private var initialSharedText: String? = null
+    private var pendingWarmText: String? = null
 
     fun attach(messenger: BinaryMessenger) {
         methodChannel = MethodChannel(messenger, METHOD_CHANNEL).apply {
@@ -35,6 +36,7 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
         methodChannel?.setMethodCallHandler(null)
         eventChannel?.setStreamHandler(null)
         eventSink = null
+        pendingWarmText = null
     }
 
     fun captureInitialIntent(intent: Intent?) {
@@ -48,12 +50,20 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
         if (sink != null) {
             mainHandler.post { sink.success(text) }
         } else {
-            initialSharedText = text
+            pendingWarmText = text
+            if (initialSharedText == null) {
+                initialSharedText = text
+            }
         }
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         eventSink = events
+        val pending = pendingWarmText
+        if (pending != null && events != null) {
+            pendingWarmText = null
+            mainHandler.post { events.success(pending) }
+        }
     }
 
     override fun onCancel(arguments: Any?) {
@@ -76,7 +86,9 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
         if (intent.action != Intent.ACTION_SEND) return null
         val type = intent.type ?: return null
         if (!type.startsWith("text/")) return null
-        val shared = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
-        return if (shared.isNullOrEmpty()) null else shared
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        if (!sharedText.isNullOrEmpty()) return sharedText
+        val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim()
+        return if (sharedSubject.isNullOrEmpty()) null else sharedSubject
     }
 }

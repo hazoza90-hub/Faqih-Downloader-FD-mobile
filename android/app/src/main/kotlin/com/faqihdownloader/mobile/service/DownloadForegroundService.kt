@@ -34,11 +34,89 @@ class DownloadForegroundService : Service() {
         const val EXTRA_BODY = "extra_body"
         const val EXTRA_PROGRESS = "extra_progress"
         const val EXTRA_INDETERMINATE = "extra_indeterminate"
+        const val EXTRA_PAUSE_LABEL = "extra_pause_label"
+        const val EXTRA_CANCEL_LABEL = "extra_cancel_label"
+
+        const val DEFAULT_PAUSE_LABEL = "Pause All"
+        const val DEFAULT_CANCEL_LABEL = "Cancel All"
+
+        @Volatile
+        var isRunning: Boolean = false
 
         @Volatile
         var actionListener: ((String) -> Unit)? = null
 
         private var completedCounter = 0
+
+        fun updateProgressIfRunning(
+            context: Context,
+            title: String,
+            body: String,
+            progress: Int,
+            indeterminate: Boolean,
+            pauseLabel: String = DEFAULT_PAUSE_LABEL,
+            cancelLabel: String = DEFAULT_CANCEL_LABEL,
+        ): Boolean {
+            if (!isRunning) return false
+            ensureChannels(context)
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(
+                NOTIFICATION_ID,
+                buildProgressNotification(
+                    context = context,
+                    title = title,
+                    body = body,
+                    progress = progress,
+                    indeterminate = indeterminate,
+                    pauseLabel = pauseLabel,
+                    cancelLabel = cancelLabel,
+                ),
+            )
+            return true
+        }
+
+        fun buildProgressNotification(
+            context: Context,
+            title: String,
+            body: String,
+            progress: Int,
+            indeterminate: Boolean,
+            pauseLabel: String = DEFAULT_PAUSE_LABEL,
+            cancelLabel: String = DEFAULT_CANCEL_LABEL,
+        ): Notification {
+            val openPending = PendingIntent.getActivity(
+                context,
+                10,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val pausePending = PendingIntent.getService(
+                context,
+                11,
+                Intent(context, DownloadForegroundService::class.java).setAction(ACTION_PAUSE_ALL),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val cancelPending = PendingIntent.getService(
+                context,
+                12,
+                Intent(context, DownloadForegroundService::class.java).setAction(ACTION_CANCEL_ALL),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+
+            return NotificationCompat.Builder(context, CHANNEL_DOWNLOADS)
+                .setSmallIcon(context.applicationInfo.icon)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(openPending)
+                .setProgress(100, progress.coerceIn(0, 100), indeterminate)
+                .addAction(0, pauseLabel.ifBlank { DEFAULT_PAUSE_LABEL }, pausePending)
+                .addAction(0, cancelLabel.ifBlank { DEFAULT_CANCEL_LABEL }, cancelPending)
+                .build()
+        }
 
         fun showCompleted(context: Context, title: String, body: String) {
             ensureChannels(context)
@@ -101,10 +179,13 @@ class DownloadForegroundService : Service() {
             ACTION_START -> {
                 acquireLocks()
                 val notification = buildProgressNotification(
+                    context = this,
                     title = intent.getStringExtra(EXTRA_TITLE) ?: "Faqih Downloader",
                     body = intent.getStringExtra(EXTRA_BODY) ?: "Downloading...",
                     progress = intent.getIntExtra(EXTRA_PROGRESS, 0),
                     indeterminate = intent.getBooleanExtra(EXTRA_INDETERMINATE, true),
+                    pauseLabel = intent.getStringExtra(EXTRA_PAUSE_LABEL) ?: DEFAULT_PAUSE_LABEL,
+                    cancelLabel = intent.getStringExtra(EXTRA_CANCEL_LABEL) ?: DEFAULT_CANCEL_LABEL,
                 )
                 ServiceCompat.startForeground(
                     this,
@@ -112,22 +193,27 @@ class DownloadForegroundService : Service() {
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
                 )
+                isRunning = true
             }
             ACTION_UPDATE -> {
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 manager.notify(
                     NOTIFICATION_ID,
                     buildProgressNotification(
+                        context = this,
                         title = intent.getStringExtra(EXTRA_TITLE) ?: "Faqih Downloader",
                         body = intent.getStringExtra(EXTRA_BODY) ?: "Downloading...",
                         progress = intent.getIntExtra(EXTRA_PROGRESS, 0),
                         indeterminate = intent.getBooleanExtra(EXTRA_INDETERMINATE, false),
+                        pauseLabel = intent.getStringExtra(EXTRA_PAUSE_LABEL) ?: DEFAULT_PAUSE_LABEL,
+                        cancelLabel = intent.getStringExtra(EXTRA_CANCEL_LABEL) ?: DEFAULT_CANCEL_LABEL,
                     ),
                 )
             }
             ACTION_PAUSE_ALL -> actionListener?.invoke("pause_all")
             ACTION_CANCEL_ALL -> actionListener?.invoke("cancel_all")
             ACTION_STOP -> {
+                isRunning = false
                 releaseLocks()
                 ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -137,48 +223,9 @@ class DownloadForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        isRunning = false
         releaseLocks()
         super.onDestroy()
-    }
-
-    private fun buildProgressNotification(
-        title: String,
-        body: String,
-        progress: Int,
-        indeterminate: Boolean,
-    ): Notification {
-        val openPending = PendingIntent.getActivity(
-            this,
-            10,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val pausePending = PendingIntent.getService(
-            this,
-            11,
-            Intent(this, DownloadForegroundService::class.java).setAction(ACTION_PAUSE_ALL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val cancelPending = PendingIntent.getService(
-            this,
-            12,
-            Intent(this, DownloadForegroundService::class.java).setAction(ACTION_CANCEL_ALL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_DOWNLOADS)
-            .setSmallIcon(applicationInfo.icon)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setContentIntent(openPending)
-            .setProgress(100, progress.coerceIn(0, 100), indeterminate)
-            .addAction(0, "Pause All", pausePending)
-            .addAction(0, "Cancel All", cancelPending)
-            .build()
     }
 
     private fun acquireLocks() {

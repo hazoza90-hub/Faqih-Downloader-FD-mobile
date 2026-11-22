@@ -96,13 +96,32 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
         }
     }
 
+    private fun sanitizeSubFolder(raw: String): String {
+        var clean = raw.replace(Regex("[\\\\/:*?\"<>|]+"), "")
+        while (clean.contains("..")) {
+            clean = clean.replace("..", "")
+        }
+        clean = clean.trim().trim('.').trim()
+        return if (clean.isEmpty() || clean == "." || clean == "..") "" else clean
+    }
+
+    private fun sanitizeDisplayName(raw: String): String {
+        var clean = raw.replace(Regex("[\\\\/:*?\"<>|]+"), "")
+        while (clean.contains("..")) {
+            clean = clean.replace("..", "")
+        }
+        clean = clean.trim().trim('.').trim()
+        return if (clean.isEmpty() || clean == "." || clean == "..") "download.bin" else clean
+    }
+
     private fun exportWithMediaStore(
         sourceFile: File,
         displayName: String,
         mimeType: String,
         subFolder: String,
     ): Map<String, Any> {
-        val cleanSub = subFolder.replace(Regex("[\\\\/:*?\"<>|]+"), "").trim()
+        val cleanSub = sanitizeSubFolder(subFolder)
+        val safeName = sanitizeDisplayName(displayName)
         val relativeDir = if (cleanSub.isEmpty()) {
             "${Environment.DIRECTORY_DOWNLOADS}/FaqihDownloader"
         } else {
@@ -111,7 +130,7 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
 
         val resolver = appContext.contentResolver
         val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, relativeDir)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -146,7 +165,7 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
 
         return mapOf(
             "uri" to uri.toString(),
-            "displayPath" to "$relativeDir/$displayName",
+            "displayPath" to "$relativeDir/$safeName",
             "sizeBytes" to copiedBytes,
         )
     }
@@ -158,7 +177,8 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
         mimeType: String,
         subFolder: String,
     ): Map<String, Any> {
-        val cleanSub = subFolder.replace(Regex("[\\\\/:*?\"<>|]+"), "").trim()
+        val cleanSub = sanitizeSubFolder(subFolder)
+        val safeName = sanitizeDisplayName(displayName)
         val baseDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val targetDir = if (cleanSub.isEmpty()) {
             File(baseDir, "FaqihDownloader")
@@ -167,7 +187,7 @@ class MediaStoreBridge(private val appContext: Context) : MethodChannel.MethodCa
         }
         if (!targetDir.exists()) targetDir.mkdirs()
 
-        val targetFile = resolveUniqueLegacyFile(targetDir, displayName)
+        val targetFile = resolveUniqueLegacyFile(targetDir, safeName)
         val tmpFile = File(targetDir, "${targetFile.name}.tmp")
         var copiedBytes = 0L
         try {

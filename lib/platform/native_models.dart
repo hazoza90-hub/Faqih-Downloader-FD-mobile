@@ -128,12 +128,16 @@ class ForegroundProgressPayload {
     required this.body,
     this.progress = 0,
     this.indeterminate = false,
+    this.pauseLabel,
+    this.cancelLabel,
   });
 
   final String title;
   final String body;
   final int progress;
   final bool indeterminate;
+  final String? pauseLabel;
+  final String? cancelLabel;
 
   Map<String, dynamic> toMap() {
     return <String, dynamic>{
@@ -141,6 +145,8 @@ class ForegroundProgressPayload {
       'body': body,
       'progress': progress.clamp(0, 100),
       'indeterminate': indeterminate,
+      'pauseLabel': ?pauseLabel,
+      'cancelLabel': ?cancelLabel,
     };
   }
 }

@@ -96,5 +96,43 @@ void main() {
         ServiceNotificationAction.unknown,
       ]);
     });
+
+    test('passes optional pauseLabel and cancelLabel only when provided', () async {
+      final calls = <MethodCall>[];
+      messenger.setMockMethodCallHandler(methodChannel, (call) async {
+        calls.add(call);
+        return true;
+      });
+
+      final channel = ForegroundServiceChannel(
+        methodChannel: methodChannel,
+        eventChannel: eventChannel,
+      );
+
+      await channel.startService(
+        const ForegroundProgressPayload(
+          title: 'Active Downloads',
+          body: 'Starting...',
+          indeterminate: true,
+        ),
+      );
+      await channel.updateProgress(
+        const ForegroundProgressPayload(
+          title: 'Active Downloads',
+          body: '75%',
+          progress: 75,
+          pauseLabel: 'إيقاف الكل',
+          cancelLabel: 'إلغاء الكل',
+        ),
+      );
+
+      final startArgs = calls[0].arguments as Map<Object?, Object?>;
+      expect(startArgs.containsKey('pauseLabel'), isFalse);
+      expect(startArgs.containsKey('cancelLabel'), isFalse);
+
+      final updateArgs = calls[1].arguments as Map<Object?, Object?>;
+      expect(updateArgs['pauseLabel'], 'إيقاف الكل');
+      expect(updateArgs['cancelLabel'], 'إلغاء الكل');
+    });
   });
 }

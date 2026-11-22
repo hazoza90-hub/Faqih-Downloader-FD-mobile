@@ -143,15 +143,35 @@ class YoutubeDlBridge(private val appContext: Context) :
         runAsync(result) {
             ensureInitialized()
             val request = YoutubeDLRequest(url)
-            for (arg in args) {
-                if (arg.isNotBlank()) request.addOption(arg)
+            var i = 0
+            while (i < args.size) {
+                val current = args[i]
+                if (current.isBlank()) {
+                    i++
+                    continue
+                }
+                if (current.startsWith("-") && i + 1 < args.size && !args[i + 1].trimStart().startsWith("-")) {
+                    request.addOption(current, args[i + 1])
+                    i += 2
+                } else {
+                    request.addOption(current)
+                    i++
+                }
             }
             for ((key, value) in options) {
                 if (key.isBlank()) continue
-                if (value == null || (value is Boolean && value)) {
-                    request.addOption(key)
-                } else if (value !is Boolean) {
-                    request.addOption(key, value.toString())
+                when (value) {
+                    is List<*> -> {
+                        for (item in value) {
+                            val str = item?.toString()
+                            if (!str.isNullOrBlank()) {
+                                request.addOption(key, str)
+                            }
+                        }
+                    }
+                    null -> request.addOption(key)
+                    is Boolean -> if (value) request.addOption(key)
+                    else -> request.addOption(key, value.toString())
                 }
             }
             val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->

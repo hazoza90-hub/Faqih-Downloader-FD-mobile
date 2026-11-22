@@ -167,5 +167,49 @@ void main() {
       expect(emitted[1].type, 'ffmpeg_log');
       expect(emitted[1].line, 'frame=120');
     });
+
+    test('downloadMedia forwards multi-value List options and paired args cleanly', () async {
+      MethodCall? captured;
+      messenger.setMockMethodCallHandler(methodChannel, (call) async {
+        captured = call;
+        return <String, Object?>{
+          'exitCode': 0,
+          'stdout': 'done',
+          'stderr': '',
+        };
+      });
+
+      final channel = YoutubeDlChannel(
+        methodChannel: methodChannel,
+        eventChannel: eventChannel,
+      );
+
+      final res = await channel.downloadMedia(
+        url: 'https://example.com/watch?v=123',
+        processId: 'dl_multi',
+        args: const <String>['--concurrent-fragments', '4', '--no-part'],
+        options: const <String, Object?>{
+          '--add-header': <String>[
+            'Referer:https://example.com',
+            'Origin:https://example.com',
+          ],
+          '-f': 'bestvideo+bestaudio',
+        },
+      );
+
+      expect(res.isSuccess, isTrue);
+      expect(captured?.method, 'downloadMedia');
+      final sentArgs = captured?.arguments as Map<Object?, Object?>;
+      expect(sentArgs['args'], <String>['--concurrent-fragments', '4', '--no-part']);
+      final sentOpts = sentArgs['options'] as Map<Object?, Object?>;
+      expect(
+        sentOpts['--add-header'],
+        <String>[
+          'Referer:https://example.com',
+          'Origin:https://example.com',
+        ],
+      );
+      expect(sentOpts['-f'], 'bestvideo+bestaudio');
+    });
   });
 }
