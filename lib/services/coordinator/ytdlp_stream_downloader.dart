@@ -108,6 +108,11 @@ class YtDlpStreamDownloader {
           : 'bestaudio/best';
     }
     if (fmt != null && fmt.formatId.isNotEmpty) {
+      final hasDubbing =
+          audio != null && !audio.isOriginal && audio.formatId.isNotEmpty;
+      if (hasDubbing) {
+        return '${fmt.formatId}+${audio.formatId}/best';
+      }
       if (fmt.isProgressive) return '${fmt.formatId}/best';
       final aId = (audio?.formatId.isNotEmpty ?? false)
           ? audio!.formatId

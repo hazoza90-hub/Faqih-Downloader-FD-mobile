@@ -168,6 +168,74 @@ class SubtitleProcessor {
         .replaceAll(']', r'\]');
   }
 
+  /// Excludes out-of-range cues, shifts timestamps by `-startSec`, and renumbers from 1.
+  static String shiftAndClipSrt(
+    String srtContent,
+    double startSec, {
+    double? endSec,
+  }) {
+    final normalized = srtContent.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final blocks = normalized.split(RegExp(r'\n{2,}'));
+    final hasEndLimit = endSec != null && endSec > startSec;
+    final cues = <_SubtitleCue>[];
+
+    for (final block in blocks) {
+      final lines = block.split('\n').where((l) => l.trim().isNotEmpty).toList();
+      final tIdx = lines.indexWhere((l) => l.contains('-->'));
+      if (tIdx < 0) continue;
+      final parts = lines[tIdx].split('-->');
+      if (parts.length < 2) continue;
+      final cueStart = _parseSeconds(parts[0]);
+      final cueEnd = _parseSeconds(parts[1]);
+      if (cueStart == null || cueEnd == null || cueEnd <= startSec) continue;
+      if (hasEndLimit && cueStart >= endSec) continue;
+
+      final shiftedStart = cueStart < startSec ? 0.0 : (cueStart - startSec);
+      var shiftedEnd = cueEnd - startSec;
+      if (hasEndLimit && shiftedEnd > (endSec - startSec)) {
+        shiftedEnd = endSec - startSec;
+      }
+      if (shiftedEnd <= shiftedStart) continue;
+
+      final textLines = lines.sublist(tIdx + 1);
+      if (textLines.isEmpty) continue;
+      cues.add(_SubtitleCue(
+        timing: '${_formatSrtTime(shiftedStart)} --> ${_formatSrtTime(shiftedEnd)}',
+        lines: textLines,
+      ));
+    }
+    return _formatCues(cues);
+  }
+
+  static double? _parseSeconds(String raw) {
+    final token = raw.trim().split(RegExp(r'\s+')).first.replaceAll(',', '.');
+    final segs = token.split(':');
+    if (segs.length < 2 || segs.length > 3) return null;
+    if (segs.length == 2) {
+      final m = int.tryParse(segs[0]);
+      final s = double.tryParse(segs[1]);
+      return (m == null || s == null) ? null : m * 60.0 + s;
+    }
+    final h = int.tryParse(segs[0]);
+    final m = int.tryParse(segs[1]);
+    final s = double.tryParse(segs[2]);
+    return (h == null || m == null || s == null) ? null : h * 3600.0 + m * 60.0 + s;
+  }
+
+  static String _formatSrtTime(double seconds) {
+    final totalMs = seconds <= 0 ? 0 : (seconds * 1000).round();
+    final ms = totalMs % 1000;
+    final totalSec = totalMs ~/ 1000;
+    final s = totalSec % 60;
+    final totalMin = totalSec ~/ 60;
+    final m = totalMin % 60;
+    final h = totalMin ~/ 60;
+    return '${h.toString().padLeft(2, '0')}:'
+        '${m.toString().padLeft(2, '0')}:'
+        '${s.toString().padLeft(2, '0')},'
+        '${ms.toString().padLeft(3, '0')}';
+  }
+
   static List<_SubtitleCue> _deduplicateCueList(List<_SubtitleCue> cues) {
     final cleaned = <_SubtitleCue>[];
     for (final cue in cues) {

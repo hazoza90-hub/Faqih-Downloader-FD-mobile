@@ -64,6 +64,12 @@ class _ControlledCoordinator extends StreamDownloadCoordinator {
   }
 
   @override
+  Future<void> resume() async {
+    paused = false;
+    _onEmit(state.copyWith(phase: DownloadPhase.downloadingDirect, speedBytesPerSec: 512 * 1024));
+  }
+
+  @override
   Future<void> cancel() async {
     cancelled = true;
     if (!finishGate.isCompleted) finishGate.complete();
@@ -151,11 +157,19 @@ void main() {
       expect(manager.activeJobs.length, 2);
       expect(fgMethodsCalled, contains('startService'));
 
-      // Notification Pause All button:
+      // Notification Pause All button stops ForegroundService:
       actionEmitter.sink?.success(<String, Object?>{'action': 'pause_all'});
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(coords['j1']!.paused, isTrue);
       expect(coords['j2']!.paused, isTrue);
+      expect(fgMethodsCalled, contains('stopService'));
+
+      // Resuming one job automatically restarts ForegroundService:
+      fgMethodsCalled.clear();
+      await manager.resume('j1');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(coords['j1']!.paused, isFalse);
+      expect(fgMethodsCalled, contains('startService'));
 
       // Finish j1 -> promotes j3 automatically & shows completion notification:
       coords['j1']!.finishGate.complete();
@@ -164,7 +178,8 @@ void main() {
       expect(manager.completedJobs.map((j) => j.id), <String>['j1']);
       expect(fgMethodsCalled, contains('showCompletedNotification'));
 
-      // Notification Cancel All button:
+      // Notification Cancel All button stops ForegroundService:
+      fgMethodsCalled.clear();
       actionEmitter.sink?.success(<String, Object?>{'action': 'cancel_all'});
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(coords['j2']!.cancelled, isTrue);

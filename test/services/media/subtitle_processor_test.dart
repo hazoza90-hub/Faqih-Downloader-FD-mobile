@@ -55,6 +55,37 @@ NOTE intro comment
       expect(rtl, contains('1\n00:00:01,000 --> 00:00:04,000'));
     });
 
+    test('shiftAndClipSrt filters out-of-range cues, clamps boundaries, and shifts to 00:00:...', () {
+      const rawSrt = '''
+1
+00:00:10,000 --> 00:00:25,000
+Before clip window
+
+2
+00:00:28,000 --> 00:00:35,000
+Overlaps start boundary
+
+3
+00:00:45,500 --> 00:01:05,000
+Overlaps end boundary
+
+4
+00:01:10,000 --> 00:01:15,000
+After clip window
+''';
+
+      final clipped = SubtitleProcessor.shiftAndClipSrt(
+        rawSrt,
+        30.0,
+        endSec: 60.0,
+      );
+
+      expect(clipped.contains('Before clip window'), isFalse);
+      expect(clipped.contains('After clip window'), isFalse);
+      expect(clipped, contains('1\n00:00:00,000 --> 00:00:05,000\nOverlaps start boundary'));
+      expect(clipped, contains('2\n00:00:15,500 --> 00:00:30,000\nOverlaps end boundary'));
+    });
+
     test('escapes backslash, colon, quotes, and brackets for FFmpeg filters', () {
       const path = r"C:\work\dir[1]\sub's:ar.srt";
       final escaped = SubtitleProcessor.escapeForFfmpegFilter(path);

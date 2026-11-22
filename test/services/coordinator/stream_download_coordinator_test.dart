@@ -260,5 +260,78 @@ void main() {
       expect(finalState.status, DownloadStatus.cancelled);
       expect(Directory(p.join(tempWorkDir.path, 'job_job_cancel_clean')).existsSync(), isFalse);
     });
+
+    test('downloads and muxes Arabic dubbing track even when video format is progressive', () async {
+      final server = await MockRangeServer.start(generateTestPayload(131072, seed: 21));
+      final ffmpegCalls = <List<String>>[];
+      String? exportedName;
+
+      messenger.setMockMethodCallHandler(mediaStoreMethod, (call) async {
+        if (call.method == 'getAppWorkDir') return tempWorkDir.path;
+        if (call.method == 'exportToDownloads') {
+          final args = Map<Object?, Object?>.from(call.arguments as Map);
+          exportedName = args['displayName']?.toString();
+          return <String, Object?>{
+            'uri': 'content://media/external/downloads/404',
+            'displayPath': 'Download/FaqihDownloader/Video/$exportedName',
+            'sizeBytes': 150000,
+          };
+        }
+        return null;
+      });
+      messenger.setMockMethodCallHandler(ytdlMethod, (call) async {
+        if (call.method == 'runFfmpeg') {
+          final args = ((call.arguments as Map<Object?, Object?>)['args'] as List<Object?>)
+              .map((e) => e.toString())
+              .toList();
+          ffmpegCalls.add(args);
+          await File(args.last).writeAsBytes(const <int>[1, 2, 3]);
+          return <String, Object?>{'exitCode': 0, 'output': 'muxed dub'};
+        }
+        return true;
+      });
+      messenger.setMockStreamHandler(
+        ytdlEvents,
+        MockStreamHandler.inline(onListen: (_, events) {}),
+      );
+
+      final ytdlChannel = YoutubeDlChannel(methodChannel: ytdlMethod, eventChannel: ytdlEvents);
+      final coord = StreamDownloadCoordinator(
+        request: DownloadJobRequest(
+          id: 'job_prog_dub',
+          url: 'https://www.youtube.com/watch?v=prog123',
+          title: 'Progressive Dubbed Lecture',
+          platform: 'YouTube',
+          selectedVideoFormat: VideoFormatOption(
+            formatId: '22',
+            resolutionLabel: '720p',
+            height: 720,
+            ext: 'mp4',
+            isProgressive: true,
+            videoUrl: server.fileUrl('/prog720.mp4'),
+          ),
+          selectedAudioTrack: AudioTrack(
+            trackId: 'ar_dub',
+            formatId: '140-ar',
+            language: 'ar',
+            label: 'Arabic (Dubbed)',
+            url: server.fileUrl('/dub_ar.m4a'),
+            ext: 'm4a',
+            isOriginal: false,
+          ),
+        ),
+        youtubeDlChannel: ytdlChannel,
+        ffmpegProcessor: FfmpegMediaProcessor(channel: ytdlChannel),
+        mediaStoreChannel: MediaStoreChannel(methodChannel: mediaStoreMethod),
+      );
+
+      final res = await coord.start();
+      await server.close();
+
+      expect(res.phase, DownloadPhase.completed);
+      expect(ffmpegCalls.length, 1);
+      expect(ffmpegCalls.single, containsAllInOrder(<String>['-map', '0:v:0', '-map', '1:a:0']));
+      expect(exportedName, 'Progressive Dubbed Lecture [Dub].mp4');
+    });
   });
 }

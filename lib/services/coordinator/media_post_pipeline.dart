@@ -81,6 +81,7 @@ class MediaPostPipeline {
     }
 
     final videoExt = _normalizedVideoExt(currentPath, request.selectedVideoFormat?.ext);
+    var wasMuxedToMp4 = false;
     if (rawAudioPath != null && rawAudioPath.isNotEmpty) {
       final muxOut = p.join(jobDir, 'stage_mux.$videoExt');
       final pid = '${request.id}_mux';
@@ -96,12 +97,24 @@ class MediaPostPipeline {
         durationSec: durSec,
         onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
       );
+      wasMuxedToMp4 = videoExt == 'mp4';
       onTrackProcess(null);
       _checkCancelled(isCancelled);
     }
 
     final clipRange = request.clipRange;
     final hasClip = clipRange != null && clipRange.isActive;
+    if (hasClip && subPath != null) {
+      final rawSrt = await File(subPath).readAsString();
+      final clippedSrt = SubtitleProcessor.shiftAndClipSrt(
+        rawSrt,
+        clipRange.startSec,
+        endSec: clipRange.endSec > 0 ? clipRange.endSec : null,
+      );
+      final clippedSubPath = p.join(jobDir, 'sub_clipped.srt');
+      await File(clippedSubPath).writeAsString(clippedSrt, flush: true);
+      subPath = clippedSubPath;
+    }
 
     if (subPath != null && request.subtitleMode == SubtitleMode.hardBurn) {
       final outExt = videoExt == 'mkv' ? 'mkv' : 'mp4';
@@ -113,6 +126,10 @@ class MediaPostPipeline {
         subtitlePath: subPath,
         outputPath: burnOut,
         fontsDir: fontsDir ?? workDir,
+        audioCodec: wasMuxedToMp4
+            ? 'aac'
+            : (request.selectedAudioTrack?.codec ??
+                request.selectedVideoFormat?.acodec),
         clipRange: hasClip ? clipRange : null,
         processId: pid,
         durationSec: durSec,

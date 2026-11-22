@@ -197,9 +197,13 @@ class DownloadQueueManager extends ChangeNotifier {
     _syncForegroundService();
   }
 
+  bool get _hasActiveNonPausedJobs => _runningIds.any(
+        (id) => _jobs[id]?.status != DownloadStatus.paused,
+      );
+
   void _syncForegroundService({bool force = false}) {
     if (_disposed) return;
-    if (_runningIds.isEmpty) {
+    if (!_hasActiveNonPausedJobs) {
       if (_fgServiceRunning) {
         _fgServiceRunning = false;
         unawaited(_safeFg(_foregroundService.stopService));
@@ -211,7 +215,11 @@ class DownloadQueueManager extends ChangeNotifier {
     if (!_fgServiceRunning) {
       _fgServiceRunning = true;
       _lastFgProgressUpdate = DateTime.now();
-      unawaited(_safeFg(() => _foregroundService.startService(payload)));
+      unawaited(
+        _safeFg(() => _foregroundService.startService(payload)).then((ok) {
+          if (!ok && !_disposed) _fgServiceRunning = false;
+        }),
+      );
       return;
     }
 
@@ -229,7 +237,7 @@ class DownloadQueueManager extends ChangeNotifier {
     String? singleTitle;
     for (final id in _runningIds) {
       final job = _jobs[id];
-      if (job == null) continue;
+      if (job == null || job.status == DownloadStatus.paused) continue;
       count++;
       singleTitle = job.title;
       totalProgress += job.progress;
@@ -267,10 +275,12 @@ class DownloadQueueManager extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> _safeFg(Future<bool> Function() op) async {
+  Future<bool> _safeFg(Future<bool> Function() op) async {
     try {
-      await op();
-    } catch (_) {}
+      return await op();
+    } catch (_) {
+      return false;
+    }
   }
 
   static StreamDownloadCoordinator _defaultCoordinatorFactory(

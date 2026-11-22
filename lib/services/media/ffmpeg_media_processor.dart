@@ -29,17 +29,8 @@ class FfmpegMediaProcessor {
     double? durationSec,
     void Function(double ratio)? onProgress,
   }) async {
-    final outExt = p.extension(outputPath).toLowerCase();
-    final isMp4 = outExt == '.mp4' || outExt == '.m4v' || outExt == '.mov';
-    final codecLower = (audioCodec ?? '').toLowerCase();
-    final audioExt = p.extension(audioPath).toLowerCase();
-    final incompatible = codecLower.contains('opus') ||
-        codecLower.contains('vorbis') ||
-        audioExt == '.opus' ||
-        audioExt == '.webm' ||
-        audioExt == '.ogg';
-
-    final audioArgs = (isMp4 && incompatible)
+    final isMp4 = _isMp4Family(outputPath);
+    final audioArgs = _needsAacForMp4(outputPath, audioCodec, audioPath)
         ? const <String>['-c:a', 'aac', '-b:a', '192k']
         : const <String>['-c:a', 'copy'];
 
@@ -47,6 +38,8 @@ class FfmpegMediaProcessor {
       '-y',
       '-i', videoPath,
       '-i', audioPath,
+      '-map', '0:v:0',
+      '-map', '1:a:0',
       '-c:v', 'copy',
       ...audioArgs,
       if (isMp4) ...const <String>['-movflags', '+faststart'],
@@ -104,7 +97,7 @@ class FfmpegMediaProcessor {
 
     final ext = p.extension(outputPath).toLowerCase();
     final audioOut = ext == '.mp3' || ext == '.m4a' || ext == '.aac' || ext == '.opus';
-    final isMp4 = ext == '.mp4' || ext == '.m4v' || ext == '.mov';
+    final isMp4 = _isMp4Family(outputPath);
     final clipDur = clipRange.endSec > clipRange.startSec
         ? (clipRange.endSec - clipRange.startSec)
         : null;
@@ -112,8 +105,8 @@ class FfmpegMediaProcessor {
     final args = <String>[
       '-y',
       '-ss', _formatSeconds(clipRange.startSec),
-      if (clipRange.endSec > 0) ...<String>['-to', _formatSeconds(clipRange.endSec)],
       '-i', inputPath,
+      if (clipDur != null) ...<String>['-t', _formatSeconds(clipDur)],
       if (!accurateReencode)
         ...const <String>['-c', 'copy']
       else if (audioOut)
@@ -162,6 +155,7 @@ class FfmpegMediaProcessor {
     required String outputPath,
     required String fontsDir,
     String? style,
+    String? audioCodec,
     ClipRange? clipRange,
     required String processId,
     double? durationSec,
@@ -179,21 +173,25 @@ class FfmpegMediaProcessor {
         ":charenc=UTF-8:force_style='$effectiveStyle'";
 
     final hasClip = clipRange != null && clipRange.isActive;
-    final effectiveDur = (hasClip && clipRange.endSec > clipRange.startSec)
+    final clipDur = (hasClip && clipRange.endSec > clipRange.startSec)
         ? (clipRange.endSec - clipRange.startSec)
-        : durationSec;
+        : null;
+    final effectiveDur = clipDur ?? durationSec;
+    final audioArgs = _needsAacForMp4(outputPath, audioCodec, videoPath)
+        ? const <String>['-c:a', 'aac', '-b:a', '192k']
+        : const <String>['-c:a', 'copy'];
 
     final args = <String>[
       '-y',
       if (hasClip) ...<String>['-ss', _formatSeconds(clipRange.startSec)],
-      if (hasClip && clipRange.endSec > 0) ...<String>['-to', _formatSeconds(clipRange.endSec)],
       '-i', videoPath,
+      if (clipDur != null) ...<String>['-t', _formatSeconds(clipDur)],
       '-vf', filter,
       '-c:v', 'libx264',
       '-preset', 'veryfast',
       '-crf', '22',
-      '-c:a', 'copy',
-      '-movflags', '+faststart',
+      ...audioArgs,
+      if (_isMp4Family(outputPath)) ...const <String>['-movflags', '+faststart'],
       outputPath,
     ];
     await _run(args, outputPath, processId, effectiveDur, onProgress);
@@ -267,6 +265,26 @@ class FfmpegMediaProcessor {
       _cancelledIds.remove(processId);
       await sub?.cancel();
     }
+  }
+
+  static bool _isMp4Family(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return ext == '.mp4' || ext == '.m4v' || ext == '.mov';
+  }
+
+  static bool _needsAacForMp4(
+    String outputPath,
+    String? audioCodec,
+    String sourcePath,
+  ) {
+    if (!_isMp4Family(outputPath)) return false;
+    final codec = (audioCodec ?? '').toLowerCase();
+    final srcExt = p.extension(sourcePath).toLowerCase();
+    return codec.contains('opus') ||
+        codec.contains('vorbis') ||
+        srcExt == '.opus' ||
+        srcExt == '.webm' ||
+        srcExt == '.ogg';
   }
 
   static String _formatSeconds(double seconds) {

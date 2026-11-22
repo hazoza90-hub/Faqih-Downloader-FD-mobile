@@ -84,12 +84,7 @@ class StreamDownloadCoordinator {
       await Directory(jobDir).create(recursive: true);
 
       _emitState(_state.copyWith(phase: DownloadPhase.probing, progress: 0.0));
-      await CoordinatorHelpers.upsertHistory(
-        _history,
-        request: request,
-        state: _state,
-        status: DownloadStatus.probing,
-      );
+      await _saveHistory(DownloadStatus.probing);
 
       final acquirer = MediaStreamAcquirer(
         youtubeDl: _youtubeDl,
@@ -133,11 +128,9 @@ class StreamDownloadCoordinator {
         clearErrorMessage: true,
       );
       _emitState(completed);
-      await CoordinatorHelpers.upsertHistory(
-        _history,
-        request: request,
-        state: completed,
-        status: DownloadStatus.completed,
+      await _saveHistory(
+        DownloadStatus.completed,
+        stateOverride: completed,
         filename: plan.displayName,
         filePath: exported.displayPath,
         category: plan.category,
@@ -157,16 +150,11 @@ class StreamDownloadCoordinator {
         errorMessage: err.toString(),
       );
       _emitState(failed);
-      await CoordinatorHelpers.upsertHistory(
-        _history,
-        request: request,
-        state: failed,
-        status: DownloadStatus.failed,
-      );
+      await _saveHistory(DownloadStatus.failed, stateOverride: failed);
       return failed;
     } finally {
       if (_state.phase != DownloadPhase.paused) {
-        await _cleanupJobDir();
+        await CoordinatorHelpers.cleanupDirectory(_jobDirPath);
       }
     }
   }
@@ -180,12 +168,7 @@ class StreamDownloadCoordinator {
       status: DownloadStatus.paused,
       speedBytesPerSec: 0.0,
     ));
-    await CoordinatorHelpers.upsertHistory(
-      _history,
-      request: request,
-      state: _state,
-      status: DownloadStatus.paused,
-    );
+    await _saveHistory(DownloadStatus.paused);
   }
 
   Future<void> resume() async {
@@ -196,12 +179,7 @@ class StreamDownloadCoordinator {
       phase: _activeDownloadPhase,
       status: statusForPhase(_activeDownloadPhase),
     ));
-    await CoordinatorHelpers.upsertHistory(
-      _history,
-      request: request,
-      state: _state,
-      status: DownloadStatus.downloading,
-    );
+    await _saveHistory(DownloadStatus.downloading);
   }
 
   Future<void> cancel() async {
@@ -220,7 +198,7 @@ class StreamDownloadCoordinator {
       } catch (_) {}
     }
     await _finalizeCancelled();
-    await _cleanupJobDir();
+    await CoordinatorHelpers.cleanupDirectory(_jobDirPath);
   }
 
   void setSpeedLimit(int bytesPerSec) {
@@ -324,8 +302,10 @@ class StreamDownloadCoordinator {
   }
 
   void _handleTurboProgress(DownloadPhase phase, EngineProgressSnapshot snap) {
+    if (_pauseRequested || _cancelRequested) return;
     _emitState(_state.copyWith(
       phase: phase,
+      status: statusForPhase(phase),
       progress: snap.progressRatio,
       downloadedBytes: snap.downloadedBytes,
       totalBytes: snap.totalBytes,
@@ -341,32 +321,35 @@ class StreamDownloadCoordinator {
       speedBytesPerSec: 0.0,
     );
     _emitState(cancelled);
-    await CoordinatorHelpers.upsertHistory(
-      _history,
-      request: request,
-      state: cancelled,
-      status: DownloadStatus.cancelled,
-    );
+    await _saveHistory(DownloadStatus.cancelled, stateOverride: cancelled);
     return cancelled;
   }
+
+  Future<void> _saveHistory(
+    DownloadStatus status, {
+    DownloadJobState? stateOverride,
+    String? filename,
+    String? filePath,
+    String? category,
+    int? totalSize,
+    int? downloadedBytes,
+    DateTime? completedAt,
+  }) =>
+      CoordinatorHelpers.upsertHistory(
+        _history,
+        request: request,
+        state: stateOverride ?? _state,
+        status: status,
+        filename: filename,
+        filePath: filePath,
+        category: category,
+        totalSize: totalSize,
+        downloadedBytes: downloadedBytes,
+        completedAt: completedAt,
+      );
 
   void _emitState(DownloadJobState next) {
     _state = next;
     _onStateChanged?.call(next);
-  }
-
-  Future<void> _cleanupJobDir() async {
-    final dirPath = _jobDirPath;
-    if (dirPath == null) return;
-    final dir = Directory(dirPath);
-    for (var attempt = 0; attempt < 3; attempt++) {
-      if (!dir.existsSync()) return;
-      try {
-        await dir.delete(recursive: true);
-        return;
-      } catch (_) {
-        await Future<void>.delayed(const Duration(milliseconds: 30));
-      }
-    }
   }
 }

@@ -203,8 +203,10 @@ class MediaStreamAcquirer {
     );
 
     String? aPath;
+    final wantsSeparateAudio =
+        fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
     final aUrl = (audio?.url.isNotEmpty ?? false) ? audio!.url : fmt.audioUrl;
-    if (fmt.needsAudioMerge && aUrl != null && aUrl.isNotEmpty) {
+    if (wantsSeparateAudio && aUrl != null && aUrl.isNotEmpty) {
       final aExt = (audio?.ext ?? fmt.audioExt).trim();
       aPath = p.join(jobDir, 'raw_audio.${aExt.isEmpty ? 'm4a' : aExt}');
       setActivePhase(DownloadPhase.downloadingAudio);
@@ -234,7 +236,9 @@ class MediaStreamAcquirer {
       return url.isNotEmpty && !isManifestUrl(url);
     }
     if (fmt == null || !fmt.isDirectTurboSupported) return false;
-    if (fmt.needsAudioMerge) {
+    final wantsSeparateAudio =
+        fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
+    if (wantsSeparateAudio) {
       final aUrl =
           (audio?.url.isNotEmpty ?? false) ? audio!.url : (fmt.audioUrl ?? '');
       if (aUrl.isNotEmpty && isManifestUrl(aUrl)) return false;

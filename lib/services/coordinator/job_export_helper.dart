@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:path/path.dart' as p;
 
 import '../../core/models/download_status.dart';
@@ -23,8 +25,21 @@ class ExportPlan {
   final String category;
 }
 
-/// Shared coordinator helpers for MIME lookup, category resolution, and history writes.
+/// Shared coordinator helpers for MIME lookup, category resolution, cleanup, and history writes.
 abstract final class CoordinatorHelpers {
+  static Future<void> cleanupDirectory(String? dirPath) async {
+    if (dirPath == null) return;
+    final dir = Directory(dirPath);
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (!dir.existsSync()) return;
+      try {
+        await dir.delete(recursive: true);
+        return;
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+      }
+    }
+  }
   static IsolateDownloadRunner defaultRunnerFactory({
     required String url,
     required String destinationPath,

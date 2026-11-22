@@ -110,7 +110,7 @@ void main() {
         ),
       );
 
-      // 1. Fast copy mux (mp4 + m4a)
+      // 1. Fast copy mux (mp4 + m4a) with explicit -map stream selection
       await processor.muxVideoAndAudio(
         videoPath: 'v.mp4',
         audioPath: 'a.m4a',
@@ -118,7 +118,10 @@ void main() {
         audioCodec: 'mp4a.40.2',
         processId: 'p_mux1',
       );
-      expect(capturedCalls.last, containsAllInOrder(<String>['-c:v', 'copy', '-c:a', 'copy', '-movflags', '+faststart']));
+      expect(
+        capturedCalls.last,
+        containsAllInOrder(<String>['-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'copy', '-movflags', '+faststart']),
+      );
 
       // 2. Opus audio -> MP4 forces AAC transcode
       await processor.muxVideoAndAudio(
@@ -128,7 +131,7 @@ void main() {
         audioCodec: 'opus',
         processId: 'p_mux2',
       );
-      expect(capturedCalls.last, containsAllInOrder(<String>['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']));
+      expect(capturedCalls.last, containsAllInOrder(<String>['-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k']));
 
       // 3. Extract MP3
       await processor.extractAudio(
@@ -141,14 +144,14 @@ void main() {
       expect(capturedCalls.last, containsAllInOrder(<String>['-vn', '-c:a', 'libmp3lame', '-b:a', '192k']));
       expect(capturedCalls.last, contains('title=Nasheed'));
 
-      // 4. Fast clip vs accurate clip
+      // 4. Fast clip uses -ss <start> -i <in> -t <dur>
       await processor.clipMedia(
         inputPath: 'in.mp4',
         outputPath: 'clip.mp4',
         clipRange: const ClipRange(startSec: 12, endSec: 45),
         processId: 'p_clip',
       );
-      expect(capturedCalls.last, containsAllInOrder(<String>['-ss', '12', '-to', '45', '-i', 'in.mp4', '-c', 'copy']));
+      expect(capturedCalls.last, containsAllInOrder(<String>['-ss', '12', '-i', 'in.mp4', '-t', '33', '-c', 'copy']));
 
       // 5. Soft subtitle mux
       await processor.muxSoftSubtitles(
@@ -160,24 +163,25 @@ void main() {
       );
       expect(capturedCalls.last, containsAllInOrder(<String>['-c:s', 'mov_text', '-metadata:s:s:0', 'language=ar']));
 
-      // 6. Single-pass hard burn + clip + progress parsing
+      // 6. Single-pass hard burn + clip (-ss / -t) + progress parsing + AAC fallback on opus/webm
       final ratios = <double>[];
       await processor.burnHardSubtitles(
-        videoPath: 'in.mp4',
+        videoPath: 'in.webm',
         subtitlePath: r"C:\tmp\ar'sub:1.srt",
         outputPath: 'burned.mp4',
         fontsDir: r'C:\tmp\fonts',
+        audioCodec: 'opus',
         clipRange: const ClipRange(startSec: 10, endSec: 30),
         processId: 'p_burn',
         onProgress: ratios.add,
       );
       final burnArgs = capturedCalls.last;
-      expect(burnArgs, containsAllInOrder(<String>['-ss', '10', '-to', '30', '-i', 'in.mp4']));
+      expect(burnArgs, containsAllInOrder(<String>['-ss', '10', '-i', 'in.webm', '-t', '20']));
       final vfArg = burnArgs[burnArgs.indexOf('-vf') + 1];
       expect(vfArg, contains('fontsdir='));
       expect(vfArg, contains('charenc=UTF-8'));
       expect(vfArg, contains(r"\'sub\:1.srt"));
-      expect(burnArgs, containsAllInOrder(<String>['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-c:a', 'copy']));
+      expect(burnArgs, containsAllInOrder(<String>['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-c:a', 'aac', '-b:a', '192k']));
       expect(ratios.last, 1.0);
     });
   });
