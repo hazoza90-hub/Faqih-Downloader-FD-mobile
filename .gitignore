@@ -40,6 +40,10 @@ app.*.map.json
 *.apk
 *.aab
 *.ap_
+*.jks
+*.keystore
+android/key.properties
+android/app/*.jks
 android/local.properties
 android/.gradle/
 **/.gradle/

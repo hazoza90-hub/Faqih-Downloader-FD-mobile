@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:faqih_downloader_mobile/core/config/app_constants.dart';
 import 'package:faqih_downloader_mobile/core/models/download_chunk.dart';
 import 'package:faqih_downloader_mobile/core/models/download_status.dart';
 import 'package:faqih_downloader_mobile/engine/engine_callbacks.dart';
@@ -57,7 +58,8 @@ void main() {
 
   group('GitHubReleaseUpdater', () {
     test('compares SemVer tags accurately with v prefix and pre-release suffixes', () {
-      expect(GitHubReleaseUpdater.isNewerVersion('v2.0.3', '2.0.2-mobile'), isTrue);
+      expect(AppConstants.appVersion, '2.0.2');
+      expect(GitHubReleaseUpdater.isNewerVersion('v2.0.3', '2.0.2'), isTrue);
       expect(GitHubReleaseUpdater.isNewerVersion('v2.1.0', '2.0.9'), isTrue);
       expect(GitHubReleaseUpdater.isNewerVersion('v2.0.2', '2.0.2-beta.1'), isTrue);
       expect(GitHubReleaseUpdater.isNewerVersion('v2.0.2-beta.1', '2.0.2'), isFalse);
