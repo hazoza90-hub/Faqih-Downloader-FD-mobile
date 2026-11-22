@@ -140,3 +140,41 @@ String? extractYouTubeId(String url) {
   final match = _youtubeRegex.firstMatch(trimmed);
   return match?.group(1);
 }
+
+final RegExp _httpUrlScanRegex = RegExp(r'https?://\S+', caseSensitive: false);
+final RegExp _trailingPunctuationRegex = RegExp(r'''[.,;:!?)\]\}>"']+$''');
+
+List<String> extractUrls(String text) {
+  if (text.trim().isEmpty) {
+    return const <String>[];
+  }
+  final seen = <String>{};
+  final extracted = <String>[];
+  for (final match in _httpUrlScanRegex.allMatches(text)) {
+    var candidate = match.group(0)!.trim();
+    candidate = candidate.replaceFirst(_trailingPunctuationRegex, '');
+    if (isHttpUrl(candidate) && seen.add(candidate)) {
+      extracted.add(candidate);
+    }
+  }
+  return List<String>.unmodifiable(extracted);
+}
+
+/// Namespaced helper facade around URL validation and extraction utilities.
+abstract final class UrlDetector {
+  static bool isHttpUrl(String url) => _topIsHttpUrl(url);
+  static bool isYouTubeUrl(String url) => _topIsYouTubeUrl(url);
+  static bool isSocialMediaUrl(String url) => _topIsSocialMediaUrl(url);
+  static bool isMediaUrl(String url) => _topIsMediaUrl(url);
+  static String? extractMediaPlatform(String url) => _topExtractMediaPlatform(url);
+  static String? extractYouTubeId(String url) => _topExtractYouTubeId(url);
+  static List<String> extractUrls(String text) => _topExtractUrls(text);
+}
+
+bool _topIsHttpUrl(String url) => isHttpUrl(url);
+bool _topIsYouTubeUrl(String url) => isYouTubeUrl(url);
+bool _topIsSocialMediaUrl(String url) => isSocialMediaUrl(url);
+bool _topIsMediaUrl(String url) => isMediaUrl(url);
+String? _topExtractMediaPlatform(String url) => extractMediaPlatform(url);
+String? _topExtractYouTubeId(String url) => extractYouTubeId(url);
+List<String> _topExtractUrls(String text) => extractUrls(text);

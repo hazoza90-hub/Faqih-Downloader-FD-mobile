@@ -37,8 +37,22 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    val youtubedlAndroidVersion = "0.18.1"
+    implementation("io.github.junkfood02.youtubedl-android:library:$youtubedlAndroidVersion")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:$youtubedlAndroidVersion")
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

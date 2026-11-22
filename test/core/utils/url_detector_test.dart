@@ -59,5 +59,23 @@ void main() {
       expect(isMediaUrl('https://cdn.example.com/archive.zip'), isFalse);
       expect(extractMediaPlatform('https://cdn.example.com/archive.zip'), isNull);
     });
+
+    test('extracts deduplicated HTTP/HTTPS URLs from shared text payloads', () {
+      const sharedText = '''
+Check this video: https://www.youtube.com/watch?v=dQw4w9WgXcQ!
+Mirror: https://cdn.example.com/files/video.mp4,
+Duplicate: https://www.youtube.com/watch?v=dQw4w9WgXcQ.
+Invalid: ftp://files.example.com/a.zip
+''';
+
+      expect(
+        UrlDetector.extractUrls(sharedText),
+        <String>[
+          'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          'https://cdn.example.com/files/video.mp4',
+        ],
+      );
+      expect(UrlDetector.extractUrls('no links here'), isEmpty);
+    });
   });
 }
