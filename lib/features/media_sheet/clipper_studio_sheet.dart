@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -8,6 +9,13 @@ import '../../core/models/clip_range.dart';
 import '../../core/models/youtube_stream_info.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/size_formatter.dart';
+
+/// Explicit wrapper so cancelling returns `null` while applying Reset returns `ClipperResult(range: null)`.
+class ClipperResult {
+  const ClipperResult({this.range});
+
+  final ClipRange? range;
+}
 
 /// Interactive video preview and dual-handle range trimming sheet.
 class ClipperStudioSheet extends StatefulWidget {
@@ -41,14 +49,16 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
   void initState() {
     super.initState();
     _maxSec = widget.streamInfo.durationSec > 0
-        ? widget.streamInfo.durationSec.toDouble()
+        ? math.max(1.0, widget.streamInfo.durationSec.toDouble())
         : 120.0;
-    final initStart = widget.initialRange?.startSec ?? 0.0;
-    final initEnd = (widget.initialRange?.endSec ?? 0.0) > initStart
-        ? widget.initialRange!.endSec.clamp(1.0, _maxSec)
+    final rawStart = widget.initialRange?.startSec ?? 0.0;
+    final maxStartBound = math.max(0.0, _maxSec - 1.0);
+    _startSec = rawStart.clamp(0.0, maxStartBound);
+    final minEndBound = math.min(_maxSec, _startSec + 1.0);
+    final rawEnd = (widget.initialRange?.endSec ?? 0.0) > rawStart
+        ? widget.initialRange!.endSec.clamp(minEndBound, _maxSec)
         : _maxSec;
-    _startSec = initStart.clamp(0.0, _maxSec - 1.0);
-    _endSec = initEnd.clamp(_startSec + 1.0, _maxSec);
+    _endSec = rawEnd.clamp(minEndBound, _maxSec);
 
     if (widget.enableVideoPlayer && widget.streamInfo.videoUrl.isNotEmpty) {
       unawaited(_initPlayer());
@@ -71,8 +81,13 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
       }
       final dur = ctrl.value.duration.inSeconds.toDouble();
       if (dur > 1.0 && widget.streamInfo.durationSec <= 0) {
-        _maxSec = dur;
-        if (_endSec > _maxSec || _endSec == 120.0) _endSec = _maxSec;
+        _maxSec = math.max(1.0, dur);
+        final maxStartBound = math.max(0.0, _maxSec - 1.0);
+        _startSec = _startSec.clamp(0.0, maxStartBound);
+        final minEndBound = math.min(_maxSec, _startSec + 1.0);
+        _endSec = (_endSec > _maxSec || _endSec == 120.0)
+            ? _maxSec
+            : _endSec.clamp(minEndBound, _maxSec);
       }
       setState(() => _previewReady = true);
     } catch (_) {
@@ -88,15 +103,17 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
 
   void _setStartFromCurrent() {
     final pos = _videoController?.value.position.inSeconds.toDouble() ?? _startSec;
+    final maxStart = math.max(0.0, _endSec - 1.0);
     setState(() {
-      _startSec = pos.clamp(0.0, _endSec - 1.0);
+      _startSec = pos.clamp(0.0, maxStart);
     });
   }
 
   void _setEndFromCurrent() {
     final pos = _videoController?.value.position.inSeconds.toDouble() ?? _endSec;
+    final minEnd = math.min(_maxSec, _startSec + 1.0);
     setState(() {
-      _endSec = pos.clamp(_startSec + 1.0, _maxSec);
+      _endSec = pos.clamp(minEnd, _maxSec);
     });
   }
 
@@ -216,11 +233,15 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
                 max: _maxSec,
                 values: RangeValues(_startSec, _endSec),
                 onChanged: (values) {
+                  final maxStart = math.max(0.0, _maxSec - 1.0);
+                  final nextStart = values.start.clamp(0.0, maxStart);
+                  final minEnd = math.min(_maxSec, nextStart + 1.0);
+                  final nextEnd = values.end <= minEnd
+                      ? minEnd
+                      : values.end.clamp(minEnd, _maxSec);
                   setState(() {
-                    _startSec = values.start;
-                    _endSec = values.end <= values.start + 1.0
-                        ? (values.start + 1.0).clamp(1.0, _maxSec)
-                        : values.end;
+                    _startSec = nextStart;
+                    _endSec = nextEnd;
                   });
                 },
               ),
@@ -248,6 +269,7 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
                 children: <Widget>[
                   Expanded(
                     child: OutlinedButton(
+                      key: const Key('clipper_cancel_button'),
                       onPressed: () => Navigator.of(context).pop(),
                       child: Text(tr('btn_cancel')),
                     ),
@@ -259,9 +281,11 @@ class _ClipperStudioSheetState extends State<ClipperStudioSheet> {
                       onPressed: () {
                         final isFull = _startSec <= 0.1 && (_maxSec - _endSec) <= 0.5;
                         Navigator.of(context).pop(
-                          isFull
-                              ? null
-                              : ClipRange(startSec: _startSec, endSec: _endSec),
+                          ClipperResult(
+                            range: isFull
+                                ? null
+                                : ClipRange(startSec: _startSec, endSec: _endSec),
+                          ),
                         );
                       },
                       child: Text(tr('btn_apply')),

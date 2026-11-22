@@ -124,7 +124,7 @@ void main() {
     expect(captured!.request!.subtitleMode, SubtitleMode.hardBurn);
   });
 
-  testWidgets('ClipperStudioSheet returns initial ClipRange cleanly in fallback mode', (tester) async {
+  testWidgets('ClipperStudioSheet returns ClipperResult and guards 1-second clamp bounds', (tester) async {
     final translator = AppTranslator(initialLanguage: 'en');
     const info = YouTubeStreamInfo(
       videoId: 'v1',
@@ -135,14 +135,14 @@ void main() {
       durationSec: 100,
     );
 
-    ClipRange? clipped;
+    ClipperResult? clipped;
     await tester.pumpWidget(
       MaterialApp(
         home: Builder(
           builder: (context) => Scaffold(
             body: ElevatedButton(
               onPressed: () async {
-                clipped = await showModalBottomSheet<ClipRange?>(
+                clipped = await showModalBottomSheet<ClipperResult>(
                   context: context,
                   isScrollControlled: true,
                   builder: (_) => ClipperStudioSheet(
@@ -165,6 +165,110 @@ void main() {
     await tester.tap(find.byKey(const Key('clipper_apply_button')));
     await tester.pumpAndSettle();
 
-    expect(clipped, equals(const ClipRange(startSec: 15, endSec: 60)));
+    expect(clipped, isNotNull);
+    expect(clipped!.range, equals(const ClipRange(startSec: 15, endSec: 60)));
+
+    // Guard short 1s media clamp without throwing ArgumentError:
+    const shortInfo = YouTubeStreamInfo(
+      videoId: 'short1',
+      title: 'Short Clip',
+      cleanFilename: 'Short Clip.mp4',
+      isProgressive: true,
+      videoUrl: 'https://cdn.example.com/short.mp4',
+      durationSec: 1,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ClipperStudioSheet(
+            streamInfo: shortInfo,
+            translator: translator,
+            initialRange: const ClipRange(startSec: 5, endSec: 10),
+            enableVideoPlayer: false,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(translator.tr('clipper_set_start')));
+    await tester.tap(find.text(translator.tr('clipper_set_end')));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('MediaOptionsSheet clears _clipRange cleanly on Reset + Apply after setting a range', (tester) async {
+    final translator = AppTranslator(initialLanguage: 'en');
+    const info = YouTubeStreamInfo(
+      videoId: 'v_reset',
+      title: 'Reset Clip Video',
+      cleanFilename: 'Reset Clip Video.mp4',
+      isProgressive: true,
+      videoUrl: 'https://cdn.example.com/v.mp4',
+      durationSec: 100,
+    );
+
+    MediaSheetResult? captured;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: ElevatedButton(
+              onPressed: () async {
+                captured = await showModalBottomSheet<MediaSheetResult>(
+                  context: context,
+                  isScrollControlled: true,
+                  builder: (_) => MediaOptionsSheet(
+                    streamInfo: info,
+                    translator: translator,
+                    enableVideoPlayerPreview: false,
+                  ),
+                );
+              },
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    // 1. Open clipper, adjust start thumb rightward, and Apply:
+    await tester.ensureVisible(find.byKey(const Key('open_clipper_button')));
+    await tester.tap(find.byKey(const Key('open_clipper_button')));
+    await tester.pumpAndSettle();
+
+    final sliderRect = tester.getRect(find.byKey(const Key('clipper_range_slider')));
+    await tester.dragFrom(
+      Offset(sliderRect.left + 24, sliderRect.center.dy),
+      const Offset(100, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('clipper_apply_button')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Clip range:'), findsOneWidget);
+
+    // 2. Reopen clipper, Reset + Cancel preserves previous clip range:
+    await tester.tap(find.byKey(const Key('open_clipper_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('clipper_reset_button')));
+    await tester.tap(find.byKey(const Key('clipper_cancel_button')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Clip range:'), findsOneWidget);
+
+    // 3. Reopen clipper, Reset + Apply clears clip range completely:
+    await tester.tap(find.byKey(const Key('open_clipper_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('clipper_reset_button')));
+    await tester.tap(find.byKey(const Key('clipper_apply_button')));
+    await tester.pumpAndSettle();
+    expect(find.text(translator.tr('btn_video_preview_clip')), findsOneWidget);
+
+    // 4. Starting download sends clipRange == null:
+    await tester.ensureVisible(find.byKey(const Key('sheet_download_button')));
+    await tester.tap(find.byKey(const Key('sheet_download_button')));
+    await tester.pumpAndSettle();
+    expect(captured, isNotNull);
+    expect(captured!.request!.clipRange, isNull);
   });
 }

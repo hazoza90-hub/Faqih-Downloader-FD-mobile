@@ -210,4 +210,65 @@ void main() {
 
     controller.dispose();
   });
+
+  test('AppController.openVaultEntry sends contentUri and mimeType to MediaStoreChannel.openFile', () async {
+    final openCalls = <Map<Object?, Object?>>[];
+    messenger.setMockMethodCallHandler(mediaMethod, (call) async {
+      if (call.method == 'getAppWorkDir') return tempDir.path;
+      if (call.method == 'openFile') {
+        openCalls.add(Map<Object?, Object?>.from(call.arguments as Map));
+        return true;
+      }
+      return true;
+    });
+
+    final repo = await SettingsRepository.create();
+    final controller = AppController(
+      translator: AppTranslator(initialLanguage: 'en', repository: repo),
+      settingsRepository: repo,
+      historyManager: DownloadHistoryManager(
+        storage: HistoryStorage(p.join(tempDir.path, 'history.json')),
+      ),
+      mediaStoreChannel: MediaStoreChannel(methodChannel: mediaMethod),
+      foregroundServiceChannel: ForegroundServiceChannel(
+        methodChannel: fgMethod,
+        eventChannel: fgEvents,
+      ),
+      autoInitNative: false,
+    );
+    await controller.initialize();
+
+    final withUri = HistoryEntry(
+      id: 'v1',
+      url: 'https://example.com/v1.mp4',
+      filename: 'lesson.mp4',
+      filePath: 'Download/FaqihDownloader/Video/lesson.mp4',
+      category: 'Video',
+      totalSize: 1000,
+      downloadedBytes: 1000,
+      status: DownloadStatus.completed,
+      createdAt: DateTime.utc(2026, 11, 22),
+      contentUri: 'content://media/external/downloads/99',
+    );
+    expect(await controller.openVaultEntry(withUri), isTrue);
+    expect(openCalls.last['pathOrUri'], 'content://media/external/downloads/99');
+    expect(openCalls.last['mimeType'], 'video/mp4');
+
+    final legacyNoUri = HistoryEntry(
+      id: 'v2',
+      url: 'https://example.com/v2.mp3',
+      filename: 'audio.mp3',
+      filePath: '/storage/emulated/0/Download/audio.mp3',
+      category: 'Audio',
+      totalSize: 500,
+      downloadedBytes: 500,
+      status: DownloadStatus.completed,
+      createdAt: DateTime.utc(2026, 11, 22),
+    );
+    expect(await controller.openVaultEntry(legacyNoUri), isTrue);
+    expect(openCalls.last['pathOrUri'], '/storage/emulated/0/Download/audio.mp3');
+    expect(openCalls.last['mimeType'], 'audio/mpeg');
+
+    controller.dispose();
+  });
 }

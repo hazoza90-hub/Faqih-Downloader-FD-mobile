@@ -21,19 +21,24 @@ class DownloadQueueManager extends ChangeNotifier {
     ForegroundServiceChannel? foregroundService,
     CoordinatorFactory? coordinatorFactory,
     this.progressThrottleMs = 400,
-    this.pauseLabel,
-    this.cancelLabel,
+    String? pauseLabel,
+    String? cancelLabel,
   })  : _settings = settings,
         _foregroundService = foregroundService ?? ForegroundServiceChannel(),
-        _coordinatorFactory = coordinatorFactory ?? _defaultCoordinatorFactory {
+        _coordinatorFactory = coordinatorFactory ?? _defaultCoordinatorFactory,
+        _pauseLabel = pauseLabel,
+        _cancelLabel = cancelLabel {
     _listenForegroundActions();
   }
 
   final ForegroundServiceChannel _foregroundService;
   final CoordinatorFactory _coordinatorFactory;
   final int progressThrottleMs;
-  final String? pauseLabel;
-  final String? cancelLabel;
+  String? _pauseLabel;
+  String? _cancelLabel;
+
+  String? get pauseLabel => _pauseLabel;
+  String? get cancelLabel => _cancelLabel;
 
   final Map<String, DownloadJobState> _jobs = <String, DownloadJobState>{};
   final Map<String, StreamDownloadCoordinator> _coordinators =
@@ -68,6 +73,17 @@ class DownloadQueueManager extends ChangeNotifier {
     setGlobalSpeedLimit(next.speedLimitBytesPerSec);
     _pumpQueue();
     notifyListeners();
+  }
+
+  void updateNotificationLabels({
+    required String pauseLabel,
+    required String cancelLabel,
+  }) {
+    _pauseLabel = pauseLabel;
+    _cancelLabel = cancelLabel;
+    if (_fgServiceRunning) {
+      _syncForegroundService(force: true);
+    }
   }
 
   DownloadJobState enqueue(DownloadJobRequest request) {

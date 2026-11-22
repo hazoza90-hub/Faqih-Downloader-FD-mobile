@@ -66,7 +66,7 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
   }
 
   Future<void> _openClipper() async {
-    final result = await showModalBottomSheet<ClipRange?>(
+    final result = await showModalBottomSheet<ClipperResult>(
       context: context,
       isScrollControlled: true,
       builder: (_) => ClipperStudioSheet(
@@ -76,10 +76,8 @@ class _MediaOptionsSheetState extends State<MediaOptionsSheet> {
         enableVideoPlayer: widget.enableVideoPlayerPreview,
       ),
     );
-    if (!mounted) return;
-    if (result != null) {
-      setState(() => _clipRange = result);
-    }
+    if (!mounted || result == null) return;
+    setState(() => _clipRange = result.range);
   }
 
   void _submitStart() {

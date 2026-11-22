@@ -5,8 +5,8 @@ import '../../core/config/app_constants.dart';
 import '../../core/i18n/translator.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/size_formatter.dart';
-import '../../services/updater/github_release_updater.dart';
 import 'cookies_login_screen.dart';
+import 'update_dialog.dart';
 
 /// Application settings screen wiring language, theme, concurrency, cookies, and updaters.
 class SettingsScreen extends StatefulWidget {
@@ -36,6 +36,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _updatingYtDlp = false;
   bool _checkingAppUpdate = false;
 
+  void _showSnack(ScaffoldMessengerState messenger, String message) {
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _updateYtDlp() async {
     setState(() => _updatingYtDlp = true);
     final messenger = ScaffoldMessenger.of(context);
@@ -44,23 +48,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final res = await widget.controller.updateYtDlpEngine();
       if (!mounted) return;
       final isUpdated = res.status.toUpperCase() == 'DONE';
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            tr(
-              isUpdated ? 'msg_ytdlp_updated' : 'msg_ytdlp_uptodate',
-              params: <String, String>{'ver': res.ytdlpVersion},
-            ),
-          ),
+      _showSnack(
+        messenger,
+        tr(
+          isUpdated ? 'msg_ytdlp_updated' : 'msg_ytdlp_uptodate',
+          params: <String, String>{'ver': res.ytdlpVersion},
         ),
       );
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(tr('msg_ytdlp_failed', params: <String, String>{'err': '$e'})),
-          ),
-        );
+        _showSnack(messenger, tr('msg_ytdlp_failed', params: <String, String>{'err': '$e'}));
       }
     } finally {
       if (mounted) setState(() => _updatingYtDlp = false);
@@ -75,80 +72,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final info = await widget.controller.updater.checkForUpdate();
       if (!mounted) return;
       if (!info.hasUpdate) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              tr('updater_up_to_date', params: <String, String>{'ver': info.currentVersion}),
-            ),
-          ),
+        _showSnack(
+          messenger,
+          tr('updater_up_to_date', params: <String, String>{'ver': info.currentVersion}),
         );
         return;
       }
-      await _showUpdateDialog(info);
+      await showReleaseUpdateDialog(
+        context: context,
+        translator: widget.translator,
+        updater: widget.controller.updater,
+        info: info,
+      );
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(tr('updater_failed', params: <String, String>{'err': '$e'})),
-          ),
-        );
+        _showSnack(messenger, tr('updater_failed', params: <String, String>{'err': '$e'}));
       }
     } finally {
       if (mounted) setState(() => _checkingAppUpdate = false);
     }
-  }
-
-  Future<void> _showUpdateDialog(ReleaseUpdateInfo info) async {
-    final tr = widget.translator.tr;
-    double? downloadProgress;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(tr('updater_available_title', params: <String, String>{'ver': info.latestVersion})),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(tr('updater_changelog'), style: const TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              Text(info.releaseNotes.isEmpty ? '-' : info.releaseNotes, maxLines: 6, overflow: TextOverflow.ellipsis),
-              if (info.apkSizeBytes > 0) ...<Widget>[
-                const SizedBox(height: 8),
-                Text('${info.apkName} • ${formatFileSize(info.apkSizeBytes)}', style: const TextStyle(fontSize: 12)),
-              ],
-              if (downloadProgress != null) ...<Widget>[
-                const SizedBox(height: 12),
-                LinearProgressIndicator(value: downloadProgress),
-                const SizedBox(height: 4),
-                Text(
-                  tr('updater_downloading', params: <String, String>{
-                    'pct': '${(downloadProgress! * 100).round()}',
-                  }),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ],
-            ],
-          ),
-          actions: <Widget>[
-            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: Text(tr('btn_close'))),
-            ElevatedButton(
-              onPressed: info.apkUrl.isEmpty || downloadProgress != null
-                  ? null
-                  : () async {
-                      setDialogState(() => downloadProgress = 0.0);
-                      await widget.controller.updater.downloadAndInstallUpdate(
-                        info,
-                        onProgress: (p) => setDialogState(() => downloadProgress = p),
-                      );
-                      if (ctx.mounted) Navigator.of(ctx).pop();
-                    },
-              child: Text(tr('btn_install_update')),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -311,12 +253,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             OutlinedButton(
                               key: const Key('settings_clear_cookies'),
                               onPressed: () async {
+                                final messenger = ScaffoldMessenger.of(context);
                                 await widget.controller.clearCookies();
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text(tr('msg_cookies_cleared'))),
-                                  );
-                                }
+                                if (context.mounted) _showSnack(messenger, tr('msg_cookies_cleared'));
                               },
                               child: Text(tr('btn_clear_cookies')),
                             ),
@@ -379,11 +318,7 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: Text(
         text,
-        style: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: AppColors.accent,
-        ),
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.accent),
       ),
     );
   }

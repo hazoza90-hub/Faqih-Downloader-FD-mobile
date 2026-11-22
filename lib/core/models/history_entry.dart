@@ -18,6 +18,7 @@ class HistoryEntry {
     this.completedAt,
     this.platform = 'Direct',
     this.resolution,
+    this.contentUri,
   });
 
   final String id;
@@ -32,6 +33,7 @@ class HistoryEntry {
   final DateTime? completedAt;
   final String platform;
   final String? resolution;
+  final String? contentUri;
 
   HistoryEntry copyWith({
     String? id,
@@ -48,6 +50,8 @@ class HistoryEntry {
     String? platform,
     String? resolution,
     bool clearResolution = false,
+    String? contentUri,
+    bool clearContentUri = false,
   }) {
     return HistoryEntry(
       id: id ?? this.id,
@@ -62,6 +66,7 @@ class HistoryEntry {
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       platform: platform ?? this.platform,
       resolution: clearResolution ? null : (resolution ?? this.resolution),
+      contentUri: clearContentUri ? null : (contentUri ?? this.contentUri),
     );
   }
 
@@ -79,6 +84,7 @@ class HistoryEntry {
       'completedAt': completedAt?.toUtc().toIso8601String(),
       'platform': platform,
       'resolution': resolution,
+      'content_uri': contentUri,
     };
   }
 
@@ -98,6 +104,7 @@ class HistoryEntry {
       completedAt: _parseDate(completedRaw),
       platform: json['platform']?.toString() ?? 'Direct',
       resolution: json['resolution']?.toString(),
+      contentUri: json['content_uri']?.toString(),
     );
   }
 
@@ -130,7 +137,8 @@ class HistoryEntry {
         other.createdAt == createdAt &&
         other.completedAt == completedAt &&
         other.platform == platform &&
-        other.resolution == resolution;
+        other.resolution == resolution &&
+        other.contentUri == contentUri;
   }
 
   @override
@@ -147,5 +155,6 @@ class HistoryEntry {
     completedAt,
     platform,
     resolution,
+    contentUri,
   );
 }

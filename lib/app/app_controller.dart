@@ -20,6 +20,7 @@ import '../platform/share_intent_channel.dart';
 import '../platform/youtube_dl_channel.dart';
 import '../services/coordinator/download_job_models.dart';
 import '../services/coordinator/download_queue_manager.dart';
+import '../services/coordinator/job_export_helper.dart';
 import '../services/coordinator/stream_download_coordinator.dart';
 import '../services/history/history_manager.dart';
 import '../services/history/history_storage.dart';
@@ -287,6 +288,10 @@ class AppController extends ChangeNotifier {
     _settings = next;
     if (langChanged) {
       await translator.setLanguage(next.language);
+      _queue?.updateNotificationLabels(
+        pauseLabel: translator.tr('notif_pause_all'),
+        cancelLabel: translator.tr('notif_cancel_all'),
+      );
     }
     await _settingsRepo?.save(next);
     _queue?.updateSettings(next);
@@ -320,7 +325,13 @@ class AppController extends ChangeNotifier {
   }
 
   Future<bool> openVaultEntry(HistoryEntry entry) {
-    return _mediaStore.openFile(pathOrUri: entry.filePath);
+    final target = (entry.contentUri != null && entry.contentUri!.trim().isNotEmpty)
+        ? entry.contentUri!
+        : entry.filePath;
+    final mimeType = CoordinatorHelpers.mimeTypeForExt(
+      p.extension(entry.filename).replaceFirst('.', ''),
+    );
+    return _mediaStore.openFile(pathOrUri: target, mimeType: mimeType);
   }
 
   Future<void> removeHistoryEntry(String id, {bool deleteFile = false}) async {

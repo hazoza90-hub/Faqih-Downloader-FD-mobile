@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:faqih_downloader_mobile/app/app_controller.dart';
 import 'package:faqih_downloader_mobile/core/config/settings_repository.dart';
 import 'package:faqih_downloader_mobile/core/i18n/translator.dart';
 import 'package:faqih_downloader_mobile/features/settings/settings_screen.dart';
+import 'package:faqih_downloader_mobile/features/settings/update_dialog.dart';
 import 'package:faqih_downloader_mobile/platform/channel_names.dart';
 import 'package:faqih_downloader_mobile/platform/youtube_dl_channel.dart';
 import 'package:faqih_downloader_mobile/services/history/history_manager.dart';
 import 'package:faqih_downloader_mobile/services/history/history_storage.dart';
+import 'package:faqih_downloader_mobile/services/updater/github_release_updater.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,11 +99,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(controller.queueManager!.pauseLabel, translator.tr('notif_pause_all'));
     // Change language AR -> EN:
     await tester.tap(find.byKey(const Key('settings_lang_en')));
     await tester.pumpAndSettle();
     expect(controller.settings.language, 'en');
     expect(translator.languageCode, 'en');
+    expect(controller.queueManager!.pauseLabel, 'Pause All');
+    expect(controller.queueManager!.cancelLabel, 'Cancel All');
 
     // Change theme dark -> light:
     await tester.tap(find.byKey(const Key('settings_theme_light')));
@@ -123,4 +129,83 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('showReleaseUpdateDialog catches failure, re-enables button, and guards mounted state', (tester) async {
+    final gate = Completer<bool>();
+    void Function(double progress)? capturedProgress;
+    var failNext = true;
+    final updater = _MockUpdater(
+      onDownload: (onProgress) async {
+        capturedProgress = onProgress;
+        onProgress?.call(0.5);
+        if (failNext) {
+          throw Exception('network down');
+        }
+        return gate.future;
+      },
+    );
+    final translator = AppTranslator(initialLanguage: 'en');
+    const info = ReleaseUpdateInfo(
+      hasUpdate: true,
+      currentVersion: '1.0.0',
+      latestVersion: '1.1.0',
+      releaseNotes: 'Bug fixes',
+      apkUrl: 'https://example.com/app.apk',
+      apkName: 'app.apk',
+      apkSizeBytes: 1024 * 1024,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: ElevatedButton(
+              onPressed: () => showReleaseUpdateDialog(
+                context: context,
+                translator: translator,
+                updater: updater,
+                info: info,
+              ),
+              child: const Text('ShowUpdate'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // 1. Tap install -> fails -> button re-enabled & SnackBar shown:
+    await tester.tap(find.text('ShowUpdate'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('updater_install_button')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('network down'), findsOneWidget);
+    final btn = tester.widget<ElevatedButton>(
+      find.byKey(const Key('updater_install_button')),
+    );
+    expect(btn.onPressed, isNotNull);
+
+    // 2. Dismiss dialog while download is in flight -> progress callback after close does not throw:
+    failNext = false;
+    await tester.tap(find.byKey(const Key('updater_install_button')));
+    await tester.pump();
+    await tester.tap(find.text(translator.tr('btn_close')));
+    await tester.pumpAndSettle();
+    capturedProgress?.call(0.9);
+    gate.complete(true);
+    await tester.pumpAndSettle();
+  });
+}
+
+class _MockUpdater extends GitHubReleaseUpdater {
+  _MockUpdater({required this.onDownload});
+
+  final Future<bool> Function(void Function(double progress)? onProgress)
+      onDownload;
+
+  @override
+  Future<bool> downloadAndInstallUpdate(
+    ReleaseUpdateInfo info, {
+    void Function(double progress)? onProgress,
+  }) =>
+      onDownload(onProgress);
 }

@@ -163,12 +163,22 @@ void main() {
         completedAt: completed,
         platform: 'YouTube',
         resolution: '1080p',
+        contentUri: 'content://media/external/downloads/101',
       );
 
-      final restored = HistoryEntry.fromJson(entry.toJson());
+      final encoded = entry.toJson();
+      expect(encoded['content_uri'], 'content://media/external/downloads/101');
+
+      final restored = HistoryEntry.fromJson(encoded);
       expect(restored, equals(entry));
+      expect(restored.contentUri, 'content://media/external/downloads/101');
+      expect(restored.copyWith(clearContentUri: true).contentUri, isNull);
       expect(restored.status.isTerminal, isTrue);
       expect(restored.status.isActive, isFalse);
+
+      // Legacy JSON without content_uri remains compatible:
+      final legacy = Map<String, dynamic>.from(encoded)..remove('content_uri');
+      expect(HistoryEntry.fromJson(legacy).contentUri, isNull);
     });
   });
 }

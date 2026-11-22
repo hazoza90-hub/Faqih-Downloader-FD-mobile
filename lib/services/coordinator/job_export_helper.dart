@@ -64,6 +64,7 @@ abstract final class CoordinatorHelpers {
     required DownloadStatus status,
     String? filename,
     String? filePath,
+    String? contentUri,
     String? category,
     int? totalSize,
     int? downloadedBytes,
@@ -84,6 +85,7 @@ abstract final class CoordinatorHelpers {
         completedAt: completedAt,
         platform: request.platform,
         resolution: state.resolution,
+        contentUri: contentUri ?? state.exportedUri,
       ),
     );
   }

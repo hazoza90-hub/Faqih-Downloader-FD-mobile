@@ -31,7 +31,7 @@ class FaqihDownloaderApp extends StatelessWidget {
         return MaterialApp(
           title: translator.tr('app_title'),
           debugShowCheckedModeBanner: false,
-          theme: mode == ThemeMode.dark ? AppTheme.dark : AppTheme.light,
+          theme: AppTheme.light,
           darkTheme: AppTheme.dark,
           themeMode: mode,
           locale: translator.locale,

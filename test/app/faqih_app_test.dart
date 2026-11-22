@@ -14,8 +14,12 @@ void main() {
     await tester.pumpAndSettle();
 
     final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
-    expect(materialApp.theme?.brightness, Brightness.dark);
-    expect(materialApp.theme?.scaffoldBackgroundColor, AppColors.bgPrimary);
+    expect(materialApp.themeMode, ThemeMode.dark);
+    expect(materialApp.theme?.brightness, Brightness.light);
+    expect(materialApp.darkTheme?.brightness, Brightness.dark);
+    final activeTheme = Theme.of(tester.element(find.byKey(const Key('tab_staged'))));
+    expect(activeTheme.brightness, Brightness.dark);
+    expect(activeTheme.scaffoldBackgroundColor, AppColors.bgPrimary);
 
     expect(find.byKey(const Key('tab_staged')), findsOneWidget);
     expect(find.byKey(const Key('tab_active')), findsOneWidget);

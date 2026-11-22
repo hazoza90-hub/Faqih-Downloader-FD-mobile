@@ -12,6 +12,8 @@ class CookiesBridge : MethodChannel.MethodCallHandler {
 
     companion object {
         const val METHOD_CHANNEL = "com.faqihdownloader.mobile/cookies"
+        private val SUBDOMAIN_PREFIXES = listOf("www.", "m.", "mobile.", "accounts.", "music.")
+        private val TWO_PART_SLDS = setOf("co", "com", "org", "net", "gov", "edu", "ac")
     }
 
     private var methodChannel: MethodChannel? = null
@@ -47,9 +49,12 @@ class CookiesBridge : MethodChannel.MethodCallHandler {
             val deduped = LinkedHashMap<String, String>()
             for (rawUrl in urls) {
                 val url = rawUrl.trim()
-                val host = Uri.parse(url).host?.lowercase()?.trim().orEmpty()
-                if (host.isEmpty()) continue
-                val domain = if (host.startsWith(".")) host else ".$host"
+                val cleanHost = Uri.parse(url).host?.trim()?.trimStart('.')?.lowercase().orEmpty()
+                if (cleanHost.isEmpty()) continue
+                val rootDomain = extractRootCookieDomain(cleanHost)
+                val hostDomain = if (isIpHost(cleanHost)) cleanHost else ".$cleanHost"
+                val domains = linkedSetOf(rootDomain)
+                if (hostDomain != rootDomain) domains.add(hostDomain)
                 val sec = if (url.startsWith("https://", ignoreCase = true)) "TRUE" else "FALSE"
                 val raw = cm.getCookie(url) ?: continue
                 for (part in raw.split(';')) {
@@ -57,8 +62,12 @@ class CookiesBridge : MethodChannel.MethodCallHandler {
                     if (idx <= 0) continue
                     val name = part.substring(0, idx).trim()
                     if (name.isEmpty()) continue
-                    deduped["$domain|$name"] =
-                        "$domain\tTRUE\t/\t$sec\t2147483647\t$name\t${part.substring(idx + 1).trim()}"
+                    val value = part.substring(idx + 1).trim()
+                    for (domain in domains) {
+                        val includeSub = if (domain.startsWith(".")) "TRUE" else "FALSE"
+                        deduped["$domain|$name"] =
+                            "$domain\t$includeSub\t/\t$sec\t2147483647\t$name\t$value"
+                    }
                 }
             }
             val outFile = File(outputPath).apply { parentFile?.mkdirs() }
@@ -73,6 +82,30 @@ class CookiesBridge : MethodChannel.MethodCallHandler {
         } catch (t: Throwable) {
             result.error("COOKIES_EXPORT_ERROR", t.message ?: t.javaClass.simpleName, null)
         }
+    }
+
+    private fun isIpHost(host: String): Boolean {
+        return host.contains(':') || host.all { it.isDigit() || it == '.' }
+    }
+
+    private fun extractRootCookieDomain(host: String): String {
+        val clean = host.trim().trimStart('.').lowercase()
+        if (clean.isEmpty() || isIpHost(clean)) return clean
+        var stripped = clean
+        while (true) {
+            val prefix = SUBDOMAIN_PREFIXES.firstOrNull { stripped.startsWith(it) && stripped.length > it.length }
+                ?: break
+            val remainder = stripped.substring(prefix.length)
+            if (!remainder.contains('.')) break
+            stripped = remainder
+        }
+        val parts = stripped.split('.').filter { it.isNotEmpty() }
+        if (parts.size <= 2) return ".$stripped"
+        val isTwoPartSld = parts.size >= 3 &&
+            parts[parts.size - 1].length == 2 &&
+            TWO_PART_SLDS.contains(parts[parts.size - 2])
+        val keepCount = if (isTwoPartSld) 3 else 2
+        return ".${parts.takeLast(keepCount).joinToString(".")}"
     }
 
     private fun handleClear(call: MethodCall, result: MethodChannel.Result) {
