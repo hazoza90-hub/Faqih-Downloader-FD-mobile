@@ -82,7 +82,16 @@ class HtmlDownloadResolver {
         readHtmlBody: true,
       );
 
+      if (fetched.statusCode < 200 || fetched.statusCode >= 300) {
+        throw HttpException('HTTP ${fetched.statusCode}', uri: fetched.finalUri);
+      }
+
+      final cookieStr = fetched.cookieHeader;
       if (!_isHtmlMime(fetched.contentType)) {
+        final mergedHeaders = <String, String>{
+          ...headers,
+          if (cookieStr.isNotEmpty) HttpHeaders.cookieHeader: cookieStr,
+        };
         return ResolvedDownloadResult(
           url: fetched.finalUri.toString(),
           filename: fetched.filename ??
@@ -92,7 +101,7 @@ class HtmlDownloadResolver {
           contentLength: fetched.contentLength,
           isHtmlLanding: false,
           resolvedFromHtml: false,
-          headers: headers,
+          headers: mergedHeaders,
         );
       }
 
@@ -101,6 +110,11 @@ class HtmlDownloadResolver {
         fetched.finalUri,
         srcIsPublic: srcIsPublic,
       );
+      final candidateHeaders = <String, String>{
+        ...headers,
+        'Referer': fetched.finalUri.toString(),
+        if (cookieStr.isNotEmpty) HttpHeaders.cookieHeader: cookieStr,
+      };
       if (!probeCandidates) {
         if (candidates.isNotEmpty) {
           final top = Uri.parse(candidates.first);
@@ -108,10 +122,7 @@ class HtmlDownloadResolver {
             url: candidates.first,
             filename: HtmlCandidateParser.extractUrlFilename(top),
             resolvedFromHtml: true,
-            headers: <String, String>{
-              ...headers,
-              'Referer': fetched.finalUri.toString(),
-            },
+            headers: candidateHeaders,
           );
         }
         return ResolvedDownloadResult(
@@ -121,10 +132,6 @@ class HtmlDownloadResolver {
         );
       }
 
-      final candidateHeaders = <String, String>{
-        ...headers,
-        'Referer': fetched.finalUri.toString(),
-      };
       for (final candidateUrl in candidates.take(3)) {
         final candUri = Uri.tryParse(candidateUrl);
         if (candUri == null) continue;
@@ -169,6 +176,11 @@ class HtmlDownloadResolver {
         if (res.statusCode >= 200 &&
             res.statusCode < 300 &&
             !_isHtmlMime(res.contentType)) {
+          final mergedHeaders = <String, String>{
+            ...headers,
+            if (res.cookieHeader.isNotEmpty)
+              HttpHeaders.cookieHeader: res.cookieHeader,
+          };
           return ResolvedDownloadResult(
             url: res.finalUri.toString(),
             filename: res.filename ??
@@ -178,7 +190,7 @@ class HtmlDownloadResolver {
             contentLength: res.contentLength,
             isHtmlLanding: false,
             resolvedFromHtml: true,
-            headers: headers,
+            headers: mergedHeaders,
           );
         }
       } on StateError {
@@ -197,6 +209,8 @@ class HtmlDownloadResolver {
     required bool readHtmlBody,
   }) async {
     var current = startUri;
+    final cookies = <String, String>{};
+    _seedCookies(headers, cookies);
     for (var hop = 0; hop <= _maxRedirects; hop++) {
       final req = await client.openUrl(method, current).timeout(timeout);
       req.followRedirects = false;
@@ -206,8 +220,14 @@ class HtmlDownloadResolver {
         'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       );
       headers.forEach(req.headers.set);
+      if (cookies.isNotEmpty) {
+        req.headers.set(HttpHeaders.cookieHeader, _formatCookies(cookies));
+      }
 
       final resp = await req.close().timeout(timeout);
+      for (final c in resp.cookies) {
+        cookies[c.name] = c.value;
+      }
       final status = resp.statusCode;
       if (status >= 300 && status < 400) {
         final loc = resp.headers.value(HttpHeaders.locationHeader);
@@ -255,10 +275,27 @@ class HtmlDownloadResolver {
         contentLength: length,
         filename: cdName,
         htmlBody: html,
+        cookieHeader: _formatCookies(cookies),
       );
     }
     throw HttpException('Too many redirects', uri: current);
   }
+
+  static void _seedCookies(Map<String, String> headers, Map<String, String> out) {
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() != HttpHeaders.cookieHeader) continue;
+      for (final part in entry.value.split(';')) {
+        final eq = part.indexOf('=');
+        if (eq <= 0) continue;
+        final k = part.substring(0, eq).trim();
+        final v = part.substring(eq + 1).trim();
+        if (k.isNotEmpty) out[k] = v;
+      }
+    }
+  }
+
+  static String _formatCookies(Map<String, String> cookies) =>
+      cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
 
   static bool _isHtmlMime(String ct) =>
       ct == 'text/html' || ct == 'application/xhtml+xml';
@@ -291,6 +328,7 @@ class _HttpFetchInfo {
     required this.contentLength,
     required this.filename,
     required this.htmlBody,
+    this.cookieHeader = '',
   });
 
   final Uri finalUri;
@@ -299,4 +337,5 @@ class _HttpFetchInfo {
   final int contentLength;
   final String? filename;
   final String htmlBody;
+  final String cookieHeader;
 }

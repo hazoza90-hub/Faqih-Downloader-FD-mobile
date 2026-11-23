@@ -185,6 +185,18 @@ class VaultStorageActions {
     } catch (_) {}
   }
 
+  Future<void> syncFloatingCaptureState() async {
+    if (!_settingsProvider().floatingCaptureEnabled) return;
+    try {
+      final running = await _floatingCapture.isRunning();
+      if (!running && _settingsProvider().floatingCaptureEnabled) {
+        await _saveSettings(
+          _settingsProvider().copyWith(floatingCaptureEnabled: false),
+        );
+      }
+    } catch (_) {}
+  }
+
   static DownloadJobRequest buildBasicRequest({
     required String id,
     required String url,

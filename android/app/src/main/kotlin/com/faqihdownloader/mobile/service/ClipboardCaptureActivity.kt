@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import com.faqihdownloader.mobile.MainActivity
 
@@ -20,17 +22,30 @@ class ClipboardCaptureActivity : Activity() {
         private val URL_REGEX = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     }
 
+    private val safetyHandler = Handler(Looper.getMainLooper())
     private var handled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        safetyHandler.postDelayed({
+            if (!handled) {
+                handled = true
+                processClipboardAndFinish()
+            }
+        }, 700L)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus || handled) return
         handled = true
+        safetyHandler.removeCallbacksAndMessages(null)
         processClipboardAndFinish()
+    }
+
+    override fun onDestroy() {
+        safetyHandler.removeCallbacksAndMessages(null)
+        super.onDestroy()
     }
 
     private fun processClipboardAndFinish() {
@@ -39,7 +54,10 @@ class ClipboardCaptureActivity : Activity() {
             cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()?.trim().orEmpty()
         }.getOrDefault("")
 
-        val matches = URL_REGEX.findAll(raw).map { it.value }.toList()
+        val matches = URL_REGEX.findAll(raw)
+            .map { it.value.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}', '"', '\'') }
+            .filter { it.isNotEmpty() }
+            .toList()
         val payload = if (matches.isNotEmpty()) matches.joinToString("\n") else ""
 
         if (payload.isNotEmpty()) {

@@ -17,6 +17,7 @@ import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.ImageView
@@ -48,20 +49,20 @@ class FloatingCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
+        if (intent == null || intent.action == ACTION_STOP) {
             stopServiceAndBubble()
             return START_NOT_STICKY
         }
 
-        val title = intent?.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+        val title = intent.getStringExtra(EXTRA_TITLE)?.takeIf { it.isNotBlank() }
             ?: "Faqih Downloader"
-        val body = intent?.getStringExtra(EXTRA_BODY)?.takeIf { it.isNotBlank() }
+        val body = intent.getStringExtra(EXTRA_BODY)?.takeIf { it.isNotBlank() }
             ?: "Tap to capture copied link"
-        val captureLabel = intent?.getStringExtra(EXTRA_CAPTURE_LABEL)?.takeIf { it.isNotBlank() }
+        val captureLabel = intent.getStringExtra(EXTRA_CAPTURE_LABEL)?.takeIf { it.isNotBlank() }
             ?: "Capture from Clipboard"
-        val stopLabel = intent?.getStringExtra(EXTRA_STOP_LABEL)?.takeIf { it.isNotBlank() }
+        val stopLabel = intent.getStringExtra(EXTRA_STOP_LABEL)?.takeIf { it.isNotBlank() }
             ?: "Stop"
-        emptyClipboardMsg = intent?.getStringExtra(EXTRA_EMPTY_CLIPBOARD_MSG)?.takeIf { it.isNotBlank() }
+        emptyClipboardMsg = intent.getStringExtra(EXTRA_EMPTY_CLIPBOARD_MSG)?.takeIf { it.isNotBlank() }
             ?: emptyClipboardMsg
 
         ensureChannel()
@@ -74,7 +75,7 @@ class FloatingCaptureService : Service() {
         )
         attachBubbleIfPermitted(captureLabel)
         isRunning = true
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -182,6 +183,9 @@ class FloatingCaptureService : Service() {
             y = (220 * density).toInt()
         }
 
+        val touchSlop = ViewConfiguration.get(this)
+            .scaledTouchSlop
+            .coerceAtLeast((12 * density).toInt())
         var startX = 0
         var startY = 0
         var touchX = 0f
@@ -202,7 +206,7 @@ class FloatingCaptureService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (abs(ev.rawX - touchX) < 12 && abs(ev.rawY - touchY) < 12) {
+                    if (abs(ev.rawX - touchX) < touchSlop && abs(ev.rawY - touchY) < touchSlop) {
                         val cap = Intent(this, ClipboardCaptureActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                             putExtra(

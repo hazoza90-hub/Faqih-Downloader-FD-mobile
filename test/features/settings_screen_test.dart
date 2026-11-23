@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:faqih_downloader_mobile/app/app_controller.dart';
+import 'package:faqih_downloader_mobile/core/config/app_settings.dart';
 import 'package:faqih_downloader_mobile/core/config/settings_repository.dart';
 import 'package:faqih_downloader_mobile/core/i18n/translator.dart';
 import 'package:faqih_downloader_mobile/features/settings/settings_screen.dart';
 import 'package:faqih_downloader_mobile/features/settings/update_dialog.dart';
 import 'package:faqih_downloader_mobile/platform/channel_names.dart';
+import 'package:faqih_downloader_mobile/platform/floating_capture_channel.dart';
 import 'package:faqih_downloader_mobile/platform/youtube_dl_channel.dart';
 import 'package:faqih_downloader_mobile/services/history/history_manager.dart';
 import 'package:faqih_downloader_mobile/services/history/history_storage.dart';
@@ -197,6 +199,48 @@ void main() {
     capturedProgress?.call(0.9);
     gate.complete(true);
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('SettingsScreen syncs floatingCaptureEnabled to false when native service stopped', (tester) async {
+    const floatChannel = MethodChannel(ChannelNames.floatingCapture);
+    messenger.setMockMethodCallHandler(floatChannel, (call) async {
+      if (call.method == 'isRunning') return false;
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(floatChannel, null));
+
+    late SettingsRepository repo;
+    late AppTranslator translator;
+    late AppController controller;
+    await tester.runAsync(() async {
+      repo = await SettingsRepository.create();
+      await repo.save(const AppSettings(floatingCaptureEnabled: true));
+      translator = AppTranslator(initialLanguage: 'en', repository: repo);
+      controller = AppController(
+        translator: translator,
+        settingsRepository: repo,
+        historyManager: DownloadHistoryManager(
+          storage: HistoryStorage(p.join(tempDir.path, 'history_sync.json')),
+        ),
+        floatingCaptureChannel: FloatingCaptureChannel(methodChannel: floatChannel),
+        autoInitNative: false,
+      );
+      await controller.initialize();
+    });
+
+    expect(controller.settings.floatingCaptureEnabled, isTrue);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsScreen(translator: translator, controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(controller.settings.floatingCaptureEnabled, isFalse);
+    expect(repo.load().floatingCaptureEnabled, isFalse);
+
+    controller.dispose();
   });
 }
 

@@ -368,6 +368,7 @@ class AppController extends ChangeNotifier {
         stopLabel: translator.tr('notif_capture_stop'),
         emptyClipboardMsg: translator.tr('msg_capture_no_url'),
       );
+  Future<void> syncFloatingCaptureState() => _vaultActions.syncFloatingCaptureState();
 
   String? _effectiveCookiesFile() {
     final path = _settings.cookiesFilePath.trim();

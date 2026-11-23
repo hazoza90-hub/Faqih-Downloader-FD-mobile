@@ -58,9 +58,7 @@ class FloatingCaptureBridge(private val appContext: Context) : MethodChannel.Met
                 result.success(true)
             }
             "stopFloatingCapture" -> {
-                val intent = Intent(appContext, FloatingCaptureService::class.java)
-                    .setAction(FloatingCaptureService.ACTION_STOP)
-                appContext.startService(intent)
+                appContext.stopService(Intent(appContext, FloatingCaptureService::class.java))
                 result.success(true)
             }
             "isRunning" -> result.success(FloatingCaptureService.isRunning)

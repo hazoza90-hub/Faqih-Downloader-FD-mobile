@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
@@ -38,6 +40,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _updatingYtDlp = false;
   bool _checkingAppUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(widget.controller.syncFloatingCaptureState());
+  }
 
   void _showSnack(ScaffoldMessengerState messenger, String message) {
     messenger.showSnackBar(SnackBar(content: Text(message)));

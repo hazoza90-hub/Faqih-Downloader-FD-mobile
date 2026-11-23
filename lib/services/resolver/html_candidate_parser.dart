@@ -89,9 +89,15 @@ abstract final class HtmlCandidateParser {
           cleaned.startsWith('data:')) {
         return;
       }
-      final parsed = Uri.tryParse(cleaned);
-      final target =
-          (parsed != null && parsed.hasScheme) ? parsed : baseUri.resolve(cleaned);
+      final Uri target;
+      try {
+        final parsed = Uri.tryParse(cleaned);
+        target = (parsed != null && parsed.hasScheme)
+            ? parsed
+            : baseUri.resolve(cleaned);
+      } catch (_) {
+        return;
+      }
       final scheme = target.scheme.toLowerCase();
       if (scheme != 'http' && scheme != 'https') return;
       if (srcIsPublic && isPrivateOrLoopbackHost(target.host)) return;
