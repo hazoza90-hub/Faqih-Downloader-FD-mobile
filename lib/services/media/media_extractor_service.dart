@@ -4,17 +4,21 @@ import '../../platform/native_models.dart';
 import '../../platform/youtube_dl_channel.dart';
 import 'format_ranker.dart';
 import 'media_exceptions.dart';
+import 'tiktok_fallback_extractor.dart';
 
 /// Extracts ranked video, dubbing, and subtitle metadata via [YoutubeDlChannel].
 class MediaExtractorService {
   MediaExtractorService({
     YoutubeDlChannel? channel,
     FormatRanker ranker = const FormatRanker(),
+    TikTokFallbackExtractor? tiktokFallback,
   })  : _channel = channel ?? YoutubeDlChannel(),
-        _ranker = ranker;
+        _ranker = ranker,
+        _tiktokFallback = tiktokFallback ?? TikTokFallbackExtractor(ranker: ranker);
 
   final YoutubeDlChannel _channel;
   final FormatRanker _ranker;
+  final TikTokFallbackExtractor _tiktokFallback;
 
   Future<YouTubeStreamInfo> extractInfo(
     String url, {
@@ -35,11 +39,57 @@ class MediaExtractorService {
 
     final effectiveId =
         processId ?? 'extract_${DateTime.now().microsecondsSinceEpoch}';
+    final cookieAttempts = _buildCookieAttempts(cleanUrl, cookiesFile);
 
+    MediaExtractionException? lastError;
+    YouTubeStreamInfo? bestResult;
+    for (final attemptCookie in cookieAttempts) {
+      try {
+        final info = await _runSingleExtract(
+          cleanUrl: cleanUrl,
+          processId: effectiveId,
+          cookiesFile: attemptCookie,
+          userAgent: userAgent,
+          headers: headers,
+          playlistItems: playlistItems,
+          timeoutSeconds: timeoutSeconds,
+        );
+        if (_hasUsableStreams(info)) return info;
+        bestResult = info;
+      } on MediaExtractionException catch (e) {
+        if (e.kind == MediaErrorKind.cancelled) rethrow;
+        lastError = e;
+      }
+    }
+
+    if (UrlDetector.isTikTokUrl(cleanUrl)) {
+      final fallback = await _tiktokFallback.extract(cleanUrl);
+      if (fallback != null && _hasUsableStreams(fallback)) return fallback;
+    }
+    if (bestResult != null) return bestResult;
+    throw lastError!;
+  }
+
+  List<String?> _buildCookieAttempts(String cleanUrl, String? cookiesFile) {
+    final trimmed = cookiesFile?.trim() ?? '';
+    if (trimmed.isEmpty) return const <String?>[null];
+    if (UrlDetector.isYouTubeUrl(cleanUrl)) return <String?>[null, trimmed];
+    return <String?>[trimmed, null];
+  }
+
+  Future<YouTubeStreamInfo> _runSingleExtract({
+    required String cleanUrl,
+    required String processId,
+    required String? cookiesFile,
+    required String? userAgent,
+    required Map<String, String>? headers,
+    required String? playlistItems,
+    required int timeoutSeconds,
+  }) async {
     try {
       final rawJson = await _channel.extractInfo(
         url: cleanUrl,
-        processId: effectiveId,
+        processId: processId,
         cookiesFile: cookiesFile,
         userAgent: userAgent,
         headers: headers,
@@ -68,6 +118,12 @@ class MediaExtractorService {
       );
     }
   }
+
+  static bool _hasUsableStreams(YouTubeStreamInfo info) =>
+      info.isPlaylist ||
+      info.videoFormats.isNotEmpty ||
+      info.audioTracks.isNotEmpty ||
+      info.videoUrl.isNotEmpty;
 
   Future<bool> cancelExtraction(String processId) {
     return _channel.cancelProcess(processId);

@@ -11,11 +11,14 @@ import 'package:faqih_downloader_mobile/services/coordinator/stream_download_coo
 import 'package:faqih_downloader_mobile/services/history/history_manager.dart';
 import 'package:faqih_downloader_mobile/services/history/history_storage.dart';
 import 'package:faqih_downloader_mobile/services/media/ffmpeg_media_processor.dart';
+import 'package:faqih_downloader_mobile/services/resolver/html_download_resolver.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 import '../../engine/mock_range_server.dart';
+
+class _RealHttpOverrides extends HttpOverrides {}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -332,6 +335,88 @@ void main() {
       expect(ffmpegCalls.length, 1);
       expect(ffmpegCalls.single, containsAllInOrder(<String>['-map', '0:v:0', '-map', '1:a:0']));
       expect(exportedName, 'Progressive Dubbed Lecture [Dub].mp4');
+    });
+
+    test('resolves HTML landing page to direct .apk with Content-Disposition filename and APK MIME', () async {
+      final apkBytes = generateTestPayload(32 * 1024, seed: 42);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(server.close);
+      final base = 'http://127.0.0.1:${server.port}';
+      final capturedExports = <Map<Object?, Object?>>[];
+
+      server.listen((req) async {
+        if (req.uri.path == '/app-landing') {
+          req.response.headers.contentType = ContentType.html;
+          req.response.write('<html><body><a href="/download?id=42" download>Get APK</a></body></html>');
+          await req.response.close();
+          return;
+        }
+        if (req.uri.path == '/download') {
+          req.response.headers.contentType =
+              ContentType.parse('application/vnd.android.package-archive');
+          req.response.headers.set('Accept-Ranges', 'bytes');
+          req.response.headers.set('Content-Disposition', 'attachment; filename="MyApp_v1.apk"');
+          if (req.method == 'HEAD') {
+            req.response.headers.set('Content-Length', '${apkBytes.length}');
+            await req.response.close();
+            return;
+          }
+          final range = req.headers.value(HttpHeaders.rangeHeader);
+          if (range != null && range.startsWith('bytes=')) {
+            final parts = range.replaceFirst('bytes=', '').split('-');
+            final start = int.parse(parts[0]);
+            final end = parts[1].isNotEmpty ? int.parse(parts[1]) : apkBytes.length - 1;
+            req.response.statusCode = HttpStatus.partialContent;
+            req.response.headers.set('Content-Range', 'bytes $start-$end/${apkBytes.length}');
+            req.response.headers.set('Content-Length', '${end - start + 1}');
+            req.response.add(apkBytes.sublist(start, end + 1));
+            await req.response.close();
+            return;
+          }
+          req.response.headers.set('Content-Length', '${apkBytes.length}');
+          req.response.add(apkBytes);
+          await req.response.close();
+          return;
+        }
+        req.response.statusCode = HttpStatus.notFound;
+        await req.response.close();
+      });
+
+      messenger.setMockMethodCallHandler(mediaStoreMethod, (call) async {
+        if (call.method == 'getAppWorkDir') return tempWorkDir.path;
+        if (call.method == 'exportToDownloads') {
+          final args = Map<Object?, Object?>.from(call.arguments as Map);
+          capturedExports.add(args);
+          return <String, Object?>{
+            'uri': 'content://media/external/downloads/505',
+            'displayPath': 'Download/FaqihDownloader/${args['subFolder']}/${args['displayName']}',
+            'sizeBytes': apkBytes.length,
+          };
+        }
+        return null;
+      });
+
+      final coord = StreamDownloadCoordinator(
+        request: DownloadJobRequest(
+          id: 'job_apk_html',
+          url: '$base/app-landing',
+          title: 'app-landing',
+        ),
+        mediaStoreChannel: MediaStoreChannel(methodChannel: mediaStoreMethod),
+        htmlResolver: HtmlDownloadResolver(
+          httpClientFactory: () => _RealHttpOverrides().createHttpClient(null),
+        ),
+        historyManager: history,
+      );
+
+      final result = await coord.start();
+      expect(result.phase, DownloadPhase.completed);
+      expect(capturedExports.single['displayName'], 'MyApp_v1.apk');
+      expect(
+        capturedExports.single['mimeType'],
+        'application/vnd.android.package-archive',
+      );
+      expect(capturedExports.single['subFolder'], 'Programs');
     });
   });
 }

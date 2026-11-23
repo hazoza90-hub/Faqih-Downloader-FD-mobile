@@ -218,6 +218,7 @@ class DownloadJobState {
   final String? resolution;
 
   DownloadJobState copyWith({
+    String? title,
     DownloadPhase? phase,
     DownloadStatus? status,
     double? progress,
@@ -235,7 +236,7 @@ class DownloadJobState {
     final nextPhase = phase ?? this.phase;
     return DownloadJobState(
       id: id,
-      title: title,
+      title: title ?? this.title,
       url: url,
       phase: nextPhase,
       status: status ?? statusForPhase(nextPhase),

@@ -31,6 +31,8 @@ class AppSettings {
     this.clipboardSnifferActive = true,
     this.clipboardAutoAnalyze = false,
     Map<String, bool>? snifferPlatforms,
+    this.floatingCaptureEnabled = false,
+    this.boardLayoutMode = 'kanban',
     this.customSaveTreeUri = '',
     this.customSaveDisplayLabel = '',
     this.preferredVideoHeight = 0,
@@ -54,6 +56,8 @@ class AppSettings {
   final bool clipboardSnifferActive;
   final bool clipboardAutoAnalyze;
   final Map<String, bool> snifferPlatforms;
+  final bool floatingCaptureEnabled;
+  final String boardLayoutMode;
   final String customSaveTreeUri;
   final String customSaveDisplayLabel;
   final int preferredVideoHeight;
@@ -77,6 +81,8 @@ class AppSettings {
     bool? clipboardSnifferActive,
     bool? clipboardAutoAnalyze,
     Map<String, bool>? snifferPlatforms,
+    bool? floatingCaptureEnabled,
+    String? boardLayoutMode,
     String? customSaveTreeUri,
     String? customSaveDisplayLabel,
     int? preferredVideoHeight,
@@ -102,6 +108,8 @@ class AppSettings {
       clipboardSnifferActive: clipboardSnifferActive ?? this.clipboardSnifferActive,
       clipboardAutoAnalyze: clipboardAutoAnalyze ?? this.clipboardAutoAnalyze,
       snifferPlatforms: _normalizePlatforms(snifferPlatforms ?? this.snifferPlatforms),
+      floatingCaptureEnabled: floatingCaptureEnabled ?? this.floatingCaptureEnabled,
+      boardLayoutMode: _normalizeBoardLayoutMode(boardLayoutMode ?? this.boardLayoutMode),
       customSaveTreeUri: (customSaveTreeUri ?? this.customSaveTreeUri).trim(),
       customSaveDisplayLabel: (customSaveDisplayLabel ?? this.customSaveDisplayLabel).trim(),
       preferredVideoHeight: _normalizeVideoHeight(preferredVideoHeight ?? this.preferredVideoHeight),
@@ -128,6 +136,8 @@ class AppSettings {
       'clipboardSnifferActive': clipboardSnifferActive,
       'clipboardAutoAnalyze': clipboardAutoAnalyze,
       'snifferPlatforms': snifferPlatforms,
+      'floatingCaptureEnabled': floatingCaptureEnabled,
+      'boardLayoutMode': boardLayoutMode,
       'customSaveTreeUri': customSaveTreeUri,
       'customSaveDisplayLabel': customSaveDisplayLabel,
       'preferredVideoHeight': preferredVideoHeight,
@@ -159,6 +169,8 @@ class AppSettings {
       clipboardSnifferActive: _parseBool(json['clipboardSnifferActive'], legacyCheck),
       clipboardAutoAnalyze: _parseBool(json['clipboardAutoAnalyze'], false),
       snifferPlatforms: _normalizePlatforms(json['snifferPlatforms']),
+      floatingCaptureEnabled: _parseBool(json['floatingCaptureEnabled'], false),
+      boardLayoutMode: _normalizeBoardLayoutMode(json['boardLayoutMode']?.toString()),
       customSaveTreeUri: (json['customSaveTreeUri']?.toString() ?? '').trim(),
       customSaveDisplayLabel: (json['customSaveDisplayLabel']?.toString() ?? '').trim(),
       preferredVideoHeight: _normalizeVideoHeight(_parseInt(json['preferredVideoHeight'], 0)),
@@ -198,6 +210,9 @@ class AppSettings {
 
   static int _normalizeVideoHeight(int value) =>
       supportedVideoHeights.contains(value) ? value : 0;
+
+  static String _normalizeBoardLayoutMode(String? raw) =>
+      (raw ?? 'kanban').trim().toLowerCase() == 'tabs' ? 'tabs' : 'kanban';
 
   static String _normalizeAudioLang(String? raw) {
     final v = (raw ?? 'original').trim().toLowerCase();
@@ -253,6 +268,8 @@ class AppSettings {
         other.clipboardSnifferActive == clipboardSnifferActive &&
         other.clipboardAutoAnalyze == clipboardAutoAnalyze &&
         mapEquals(other.snifferPlatforms, snifferPlatforms) &&
+        other.floatingCaptureEnabled == floatingCaptureEnabled &&
+        other.boardLayoutMode == boardLayoutMode &&
         other.customSaveTreeUri == customSaveTreeUri &&
         other.customSaveDisplayLabel == customSaveDisplayLabel &&
         other.preferredVideoHeight == preferredVideoHeight &&
@@ -278,6 +295,8 @@ class AppSettings {
     clipboardSnifferActive,
     clipboardAutoAnalyze,
     ...snifferPlatforms.entries.map((e) => Object.hash(e.key, e.value)),
+    floatingCaptureEnabled,
+    boardLayoutMode,
     customSaveTreeUri,
     customSaveDisplayLabel,
     preferredVideoHeight,

@@ -67,28 +67,39 @@ class ActiveTab extends StatelessWidget {
     return Column(
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-          child: Row(
-            children: <Widget>[
-              Text(
-                '${tr('tab_active')} (${jobs.length})',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                key: const Key('btn_pause_all'),
-                onPressed: onPauseAll,
-                icon: const Icon(Icons.pause_circle_outline_rounded, size: 18),
-                label: Text(tr('btn_pause_all')),
-              ),
-              TextButton.icon(
-                key: const Key('btn_cancel_all'),
-                onPressed: onCancelAll,
-                style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-                icon: const Icon(Icons.cancel_outlined, size: 18),
-                label: Text(tr('btn_cancel_all')),
-              ),
-            ],
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+          child: SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
+              runSpacing: 4,
+              children: <Widget>[
+                Text(
+                  '${tr('tab_active')} (${jobs.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                Wrap(
+                  spacing: 4,
+                  children: <Widget>[
+                    TextButton.icon(
+                      key: const Key('btn_pause_all'),
+                      onPressed: onPauseAll,
+                      icon: const Icon(Icons.pause_circle_outline_rounded, size: 17),
+                      label: Text(tr('btn_pause_all')),
+                    ),
+                    TextButton.icon(
+                      key: const Key('btn_cancel_all'),
+                      onPressed: onCancelAll,
+                      style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+                      icon: const Icon(Icons.cancel_outlined, size: 17),
+                      label: Text(tr('btn_cancel_all')),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
         Expanded(

@@ -112,6 +112,36 @@ bool isSocialMediaUrl(String url) {
   return false;
 }
 
+const Set<String> _directDownloadExtensions = <String>{
+  '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz',
+  '.exe', '.msi', '.iso', '.dmg', '.pkg', '.deb', '.rpm', '.apk', '.xapk',
+  '.bin', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.txt',
+  '.mp4', '.mp3', '.m4a', '.mkv', '.webm', '.avi', '.mov', '.flv',
+  '.wav', '.flac', '.ogg', '.opus', '.jpg', '.jpeg', '.png', '.webp', '.gif',
+};
+
+bool isTikTokUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return false;
+  if (_socialMediaPatterns['tiktok']!.hasMatch(trimmed)) return true;
+  final host = Uri.tryParse(trimmed)?.host.toLowerCase() ?? '';
+  return host == 'tiktok.com' || host.endsWith('.tiktok.com');
+}
+
+bool isDirectDownloadUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) return false;
+  final clean = trimmed.split('?').first.split('#').first.toLowerCase();
+  if (clean.endsWith('.tar.gz') || clean.endsWith('.tar.bz2') || clean.endsWith('.tar.xz')) {
+    return true;
+  }
+  final path = Uri.tryParse(clean)?.path.toLowerCase() ?? clean;
+  for (final ext in _directDownloadExtensions) {
+    if (clean.endsWith(ext) || path.endsWith(ext)) return true;
+  }
+  return false;
+}
+
 bool isMediaUrl(String url) {
   return isYouTubeUrl(url) || isSocialMediaUrl(url);
 }
@@ -165,6 +195,8 @@ abstract final class UrlDetector {
   static bool isHttpUrl(String url) => _topIsHttpUrl(url);
   static bool isYouTubeUrl(String url) => _topIsYouTubeUrl(url);
   static bool isSocialMediaUrl(String url) => _topIsSocialMediaUrl(url);
+  static bool isTikTokUrl(String url) => _topIsTikTokUrl(url);
+  static bool isDirectDownloadUrl(String url) => _topIsDirectDownloadUrl(url);
   static bool isMediaUrl(String url) => _topIsMediaUrl(url);
   static String? extractMediaPlatform(String url) => _topExtractMediaPlatform(url);
   static String? extractYouTubeId(String url) => _topExtractYouTubeId(url);
@@ -174,6 +206,8 @@ abstract final class UrlDetector {
 bool _topIsHttpUrl(String url) => isHttpUrl(url);
 bool _topIsYouTubeUrl(String url) => isYouTubeUrl(url);
 bool _topIsSocialMediaUrl(String url) => isSocialMediaUrl(url);
+bool _topIsTikTokUrl(String url) => isTikTokUrl(url);
+bool _topIsDirectDownloadUrl(String url) => isDirectDownloadUrl(url);
 bool _topIsMediaUrl(String url) => isMediaUrl(url);
 String? _topExtractMediaPlatform(String url) => extractMediaPlatform(url);
 String? _topExtractYouTubeId(String url) => extractYouTubeId(url);

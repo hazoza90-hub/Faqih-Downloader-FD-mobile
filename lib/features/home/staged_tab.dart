@@ -36,14 +36,18 @@ class StagedTab extends StatelessWidget {
     return Column(
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
           child: Row(
             children: <Widget>[
-              Text(
-                '${tr('tab_staged')} (${stagedUrls.length})',
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              Expanded(
+                child: Text(
+                  '${tr('tab_staged')} (${stagedUrls.length})',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               FilledButton.tonalIcon(
                 key: const Key('staged_start_all_button'),
                 onPressed: onStartAll,
@@ -55,40 +59,56 @@ class StagedTab extends StatelessWidget {
         ),
         Expanded(
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 2, 12, 16),
+            padding: const EdgeInsets.fromLTRB(10, 2, 10, 14),
             itemCount: stagedUrls.length,
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final url = stagedUrls[index];
               return Card(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 6, 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      const Icon(Icons.link_rounded, color: AppColors.accent),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          url,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13),
-                        ),
+                      Row(
+                        children: <Widget>[
+                          const Icon(Icons.link_rounded, color: AppColors.accent, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              url,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                          ),
+                        ],
                       ),
-                      IconButton(
-                        tooltip: tr('btn_analyze'),
-                        onPressed: () => onAnalyzeUrl(url),
-                        icon: const Icon(Icons.tune_rounded, color: AppColors.accent),
-                      ),
-                      IconButton(
-                        tooltip: tr('btn_start'),
-                        onPressed: () => onStartUrl(url),
-                        icon: const Icon(Icons.play_arrow_rounded, color: AppColors.success),
-                      ),
-                      IconButton(
-                        tooltip: tr('btn_delete'),
-                        onPressed: () => onRemoveUrl(url),
-                        icon: const Icon(Icons.close_rounded, color: AppColors.textSecondary),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: <Widget>[
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            tooltip: tr('btn_analyze'),
+                            onPressed: () => onAnalyzeUrl(url),
+                            icon: const Icon(Icons.tune_rounded, color: AppColors.accent, size: 19),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            tooltip: tr('btn_start'),
+                            onPressed: () => onStartUrl(url),
+                            icon: const Icon(Icons.play_arrow_rounded, color: AppColors.success, size: 20),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                            tooltip: tr('btn_delete'),
+                            onPressed: () => onRemoveUrl(url),
+                            icon: const Icon(Icons.close_rounded, color: AppColors.textSecondary, size: 19),
+                          ),
+                        ],
                       ),
                     ],
                   ),

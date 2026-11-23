@@ -108,6 +108,12 @@ class YoutubeDlBridge(private val appContext: Context) :
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-single-json")
             request.addOption("--no-warnings")
+            request.addOption("--no-check-certificates")
+            val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 15
+            request.addOption("--socket-timeout", effectiveTimeout.toString())
+            if (isYouTubeUrl(url)) {
+                request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
+            }
             if (!playlistItems.isNullOrBlank()) {
                 request.addOption("--playlist-items", playlistItems.trim())
             } else {
@@ -118,9 +124,6 @@ class YoutubeDlBridge(private val appContext: Context) :
             }
             if (!userAgent.isNullOrBlank()) {
                 request.addOption("--user-agent", userAgent)
-            }
-            if (timeoutSeconds != null && timeoutSeconds > 0) {
-                request.addOption("--socket-timeout", timeoutSeconds.toString())
             }
             for ((k, v) in headers) {
                 request.addOption("--add-header", "$k:$v")
@@ -143,6 +146,15 @@ class YoutubeDlBridge(private val appContext: Context) :
         runAsync(result) {
             ensureInitialized()
             val request = YoutubeDLRequest(url)
+            if (!hasFlag(args, options, "--no-check-certificates")) {
+                request.addOption("--no-check-certificates")
+            }
+            if (!hasFlag(args, options, "--socket-timeout")) {
+                request.addOption("--socket-timeout", "15")
+            }
+            if (isYouTubeUrl(url) && !hasFlag(args, options, "--extractor-args")) {
+                request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
+            }
             var i = 0
             while (i < args.size) {
                 val current = args[i]
@@ -228,6 +240,16 @@ class YoutubeDlBridge(private val appContext: Context) :
             val ffmpegCancelled = ffmpegRunner.cancel(processId)
             ytdlCancelled || ffmpegCancelled
         }
+    }
+
+    private fun isYouTubeUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("youtube.com/") || lower.contains("youtu.be/")
+    }
+
+    private fun hasFlag(args: List<String>, options: Map<String, Any?>, flag: String): Boolean {
+        if (options.containsKey(flag)) return true
+        return args.any { it == flag || it.startsWith("$flag=") }
     }
 
     private fun ensureInitialized() {

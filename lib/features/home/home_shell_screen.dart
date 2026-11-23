@@ -10,18 +10,18 @@ import '../../core/utils/url_detector.dart';
 import '../../services/clipboard/clipboard_sniffer_service.dart';
 import '../../services/coordinator/download_job_models.dart';
 import '../../services/history/history_manager.dart';
-import '../media_sheet/media_options_sheet.dart';
-import '../media_sheet/playlist_picker_sheet.dart';
 import '../settings/cookies_login_screen.dart';
 import '../settings/settings_screen.dart';
 import 'active_tab.dart';
 import 'clipboard_banner.dart';
 import 'home_app_bar.dart';
+import 'home_url_router.dart';
+import 'kanban_board_view.dart';
 import 'staged_tab.dart';
 import 'url_input_bar.dart';
 import 'vault_tab.dart';
 
-/// Main 3-tab Kanban mobile shell wired to [AppController], clipboard sniffer, media sheets, and settings.
+/// Main 3-column Kanban / tabs mobile shell wired to [AppController], clipboard sniffer, media sheets, and settings.
 class HomeShellScreen extends StatefulWidget {
   const HomeShellScreen({
     super.key,
@@ -42,6 +42,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   final TextEditingController _urlController = TextEditingController();
   final List<String> _fallbackStagedUrls = <String>[];
   int _selectedTabIndex = 0;
+  String _fallbackLayoutMode = 'kanban';
   StreamSubscription<String>? _shareSub;
   ClipboardSnifferService? _sniffer;
   String? _snifferBannerUrl;
@@ -56,7 +57,10 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
         if (!mounted) return;
         _urlController.text = url;
         _sniffer?.markSeen(url);
-        _showSnack(ScaffoldMessenger.of(context), widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}));
+        _showSnack(
+          ScaffoldMessenger.of(context),
+          widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}),
+        );
         unawaited(_analyzeAndRoute(url));
       });
       _sniffer = ClipboardSnifferService(
@@ -118,7 +122,10 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     });
     _showSnack(
       ScaffoldMessenger.of(context),
-      widget.translator.tr('msg_multi_urls_staged', params: <String, String>{'count': '${added > 0 ? added : urls.length}'}),
+      widget.translator.tr(
+        'msg_multi_urls_staged',
+        params: <String, String>{'count': '${added > 0 ? added : urls.length}'},
+      ),
     );
   }
 
@@ -156,7 +163,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
 
     if (widget.controller == null) {
       setState(() => _fallbackStagedUrls.insert(0, url));
-      messenger.showSnackBar(SnackBar(content: Text(tr('msg_url_queued', params: <String, String>{'url': url}))));
+      messenger.showSnackBar(
+        SnackBar(content: Text(tr('msg_url_queued', params: <String, String>{'url': url}))),
+      );
       return;
     }
     await _analyzeAndRoute(url);
@@ -167,65 +176,27 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
 
   Future<void> _analyzeAndRoute(String url) async {
     final ctrl = widget.controller;
-    if (ctrl == null) return;
-    final messenger = ScaffoldMessenger.of(context);
-    final tr = widget.translator.tr;
+    if (ctrl == null || !mounted) return;
+    await analyzeAndRouteUrl(
+      context: context,
+      isMounted: () => mounted,
+      controller: ctrl,
+      translator: widget.translator,
+      url: url,
+      onSelectColumn: (idx) {
+        if (mounted) setState(() => _selectedTabIndex = idx);
+      },
+    );
+  }
 
-    try {
-      final result = await ctrl.analyzeUrl(url);
-      if (!mounted) return;
-      if (result.isMedia && result.mediaInfo != null) {
-        final info = result.mediaInfo!;
-        if (info.isPlaylist && info.playlistEntries.isNotEmpty) {
-          final pick = await showModalBottomSheet<PlaylistPickerResult>(
-            context: context,
-            isScrollControlled: true,
-            builder: (_) => PlaylistPickerSheet(playlistInfo: info, translator: widget.translator),
-          );
-          if (!mounted || pick == null || pick.selectedItems.isEmpty) return;
-          if (pick.action == PlaylistSheetAction.stageSelected) {
-            ctrl.stageUrls(pick.selectedUrls);
-            setState(() => _selectedTabIndex = 0);
-            _showSnack(messenger, tr('msg_playlist_staged', params: <String, String>{'count': '${pick.selectedUrls.length}'}));
-          } else {
-            for (final item in pick.selectedItems) {
-              final u = item.webpageUrl.isNotEmpty ? item.webpageUrl : item.videoUrl;
-              if (u.isNotEmpty) {
-                ctrl.enqueueSmartDownload(u, customTitle: item.title, durationSec: item.durationSec);
-              }
-            }
-            setState(() => _selectedTabIndex = 1);
-            _showSnack(messenger, tr('msg_playlist_queued', params: <String, String>{'count': '${pick.selectedItems.length}'}));
-          }
-          return;
-        }
-        final sheetResult = await showModalBottomSheet<MediaSheetResult>(
-          context: context,
-          isScrollControlled: true,
-          builder: (_) => MediaOptionsSheet(
-            streamInfo: info,
-            translator: widget.translator,
-            settings: ctrl.settings,
-            onPickExternalSubtitle: ctrl.pickExternalSubtitleFile,
-          ),
-        );
-        if (!mounted || sheetResult == null) return;
-        if (sheetResult.action == MediaSheetAction.startDownload && sheetResult.request != null) {
-          ctrl.enqueueMediaJob(sheetResult.request!);
-          setState(() => _selectedTabIndex = 1);
-        } else if (sheetResult.action == MediaSheetAction.stageForLater) {
-          ctrl.stageUrl(sheetResult.url);
-          setState(() => _selectedTabIndex = 0);
-        }
-        return;
-      }
-
-      ctrl.enqueueDirectDownload(url);
-      setState(() => _selectedTabIndex = 1);
-      messenger.showSnackBar(SnackBar(content: Text(tr('msg_url_queued', params: <String, String>{'url': url}))));
-    } catch (e) {
-      if (!mounted) return;
-      messenger.showSnackBar(SnackBar(content: Text(tr('msg_extraction_failed', params: <String, String>{'err': '$e'}))));
+  void _toggleLayoutMode() {
+    final ctrl = widget.controller;
+    final current = ctrl?.settings.boardLayoutMode ?? _fallbackLayoutMode;
+    final next = current == 'kanban' ? 'tabs' : 'kanban';
+    if (ctrl != null) {
+      unawaited(ctrl.updateSettings(ctrl.settings.copyWith(boardLayoutMode: next)));
+    } else {
+      setState(() => _fallbackLayoutMode = next);
     }
   }
 
@@ -233,7 +204,9 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     final ctrl = widget.controller;
     if (ctrl == null) return;
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => SettingsScreen(translator: widget.translator, controller: ctrl)),
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(translator: widget.translator, controller: ctrl),
+      ),
     );
   }
 
@@ -241,14 +214,18 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     final ctrl = widget.controller;
     if (ctrl == null) return;
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => CookiesLoginScreen(translator: widget.translator, controller: ctrl)),
+      MaterialPageRoute<void>(
+        builder: (_) => CookiesLoginScreen(translator: widget.translator, controller: ctrl),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final ctrl = widget.controller;
-    final listenable = ctrl == null ? widget.translator : Listenable.merge(<Listenable>[widget.translator, ctrl]);
+    final listenable = ctrl == null
+        ? widget.translator
+        : Listenable.merge(<Listenable>[widget.translator, ctrl]);
 
     return ListenableBuilder(
       listenable: listenable,
@@ -260,12 +237,71 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           if (queue != null) ...queue.queuedJobs,
           if (queue != null) ...queue.activeJobs,
         ];
-        final vaultEntries = ctrl?.historyManager?.query(bucket: KanbanBucket.vault) ?? const <HistoryEntry>[];
+        final vaultEntries = ctrl?.historyManager?.query(bucket: KanbanBucket.vault) ??
+            const <HistoryEntry>[];
+        final isKanban = (ctrl?.settings.boardLayoutMode ?? _fallbackLayoutMode) == 'kanban';
+
+        final stagedWidget = StagedTab(
+          translator: widget.translator,
+          stagedUrls: staged,
+          onAnalyzeUrl: _analyzeAndRoute,
+          onStartUrl: (u) {
+            ctrl?.enqueueSmartDownload(u);
+            setState(() => _selectedTabIndex = 1);
+          },
+          onRemoveUrl: (u) {
+            if (ctrl != null) {
+              ctrl.removeStagedUrl(u);
+            } else {
+              setState(() => _fallbackStagedUrls.remove(u));
+            }
+          },
+          onStartAll: () {
+            unawaited(ctrl?.startAllStaged());
+            setState(() => _selectedTabIndex = 1);
+          },
+        );
+        final activeWidget = ActiveTab(
+          translator: widget.translator,
+          jobs: activeJobs,
+          onPauseJob: (id) => unawaited(queue?.pause(id)),
+          onResumeJob: (id) => unawaited(queue?.resume(id)),
+          onCancelJob: (id) => unawaited(queue?.cancel(id)),
+          onPauseAll: () => unawaited(queue?.pauseAll()),
+          onCancelAll: () => unawaited(queue?.cancelAll()),
+        );
+        final vaultWidget = VaultTab(
+          translator: widget.translator,
+          entries: vaultEntries,
+          onOpenEntry: (e) => unawaited(
+            handleOpenVaultEntry(
+              context: context,
+              isMounted: () => mounted,
+              controller: ctrl,
+              translator: widget.translator,
+              entry: e,
+            ),
+          ),
+          onShareEntry: (e) => unawaited(
+            handleShareVaultEntry(
+              context: context,
+              isMounted: () => mounted,
+              controller: ctrl,
+              translator: widget.translator,
+              entry: e,
+            ),
+          ),
+          onRetryEntry: (e) => unawaited(_analyzeAndRoute(e.url)),
+          onDeleteEntry: (e, {required deleteFile}) =>
+              unawaited(ctrl?.deleteVaultEntry(e, deleteFile: deleteFile)),
+        );
 
         return Scaffold(
           appBar: HomeAppBar(
             translator: widget.translator,
             controller: ctrl,
+            isKanbanMode: isKanban,
+            onToggleLayoutMode: _toggleLayoutMode,
             onOpenCookies: _openCookies,
             onOpenSettings: _openSettings,
           ),
@@ -299,94 +335,60 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
                   onDismiss: () => setState(() => _snifferBannerUrl = null),
                 ),
               Expanded(
-                child: IndexedStack(
-                  index: _selectedTabIndex,
-                  children: <Widget>[
-                    StagedTab(
-                      translator: widget.translator,
-                      stagedUrls: staged,
-                      onAnalyzeUrl: _analyzeAndRoute,
-                      onStartUrl: (u) {
-                        ctrl?.enqueueSmartDownload(u);
-                        setState(() => _selectedTabIndex = 1);
-                      },
-                      onRemoveUrl: (u) {
-                        if (ctrl != null) {
-                          ctrl.removeStagedUrl(u);
-                        } else {
-                          setState(() => _fallbackStagedUrls.remove(u));
-                        }
-                      },
-                      onStartAll: () {
-                        unawaited(ctrl?.startAllStaged());
-                        setState(() => _selectedTabIndex = 1);
-                      },
+                child: isKanban
+                    ? KanbanBoardView(
+                        translator: widget.translator,
+                        selectedColumn: _selectedTabIndex,
+                        onSelectColumn: (i) => setState(() => _selectedTabIndex = i),
+                        stagedCount: staged.length,
+                        activeCount: activeJobs.length,
+                        vaultCount: vaultEntries.length,
+                        stagedChild: stagedWidget,
+                        activeChild: activeWidget,
+                        vaultChild: vaultWidget,
+                      )
+                    : IndexedStack(
+                        index: _selectedTabIndex,
+                        children: <Widget>[stagedWidget, activeWidget, vaultWidget],
+                      ),
+              ),
+            ],
+          ),
+          bottomNavigationBar: isKanban
+              ? null
+              : NavigationBar(
+                  selectedIndex: _selectedTabIndex,
+                  onDestinationSelected: (i) => setState(() => _selectedTabIndex = i),
+                  destinations: <NavigationDestination>[
+                    NavigationDestination(
+                      key: const Key('tab_staged'),
+                      icon: Badge(
+                        isLabelVisible: staged.isNotEmpty,
+                        label: Text('${staged.length}'),
+                        child: const Icon(Icons.inventory_2_outlined),
+                      ),
+                      label: tr('tab_staged'),
                     ),
-                    ActiveTab(
-                      translator: widget.translator,
-                      jobs: activeJobs,
-                      onPauseJob: (id) => unawaited(queue?.pause(id)),
-                      onResumeJob: (id) => unawaited(queue?.resume(id)),
-                      onCancelJob: (id) => unawaited(queue?.cancel(id)),
-                      onPauseAll: () => unawaited(queue?.pauseAll()),
-                      onCancelAll: () => unawaited(queue?.cancelAll()),
+                    NavigationDestination(
+                      key: const Key('tab_active'),
+                      icon: Badge(
+                        isLabelVisible: activeJobs.isNotEmpty,
+                        label: Text('${activeJobs.length}'),
+                        child: const Icon(Icons.bolt_rounded),
+                      ),
+                      label: tr('tab_active'),
                     ),
-                    VaultTab(
-                      translator: widget.translator,
-                      entries: vaultEntries,
-                      onOpenEntry: (e) async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          final ok = await ctrl?.openVaultEntry(e) ?? false;
-                          if (!mounted) return;
-                          _showSnack(messenger, ok ? tr('msg_file_opened') : tr('msg_open_failed', params: const <String, String>{'err': ''}));
-                        } catch (err) {
-                          if (!mounted) return;
-                          _showSnack(messenger, tr('msg_open_failed', params: <String, String>{'err': '$err'}));
-                        }
-                      },
-                      onShareEntry: (e) async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          final ok = await ctrl?.shareVaultEntry(e) ?? false;
-                          if (!ok && mounted) {
-                            _showSnack(messenger, tr('msg_share_failed', params: const <String, String>{'err': ''}));
-                          }
-                        } catch (err) {
-                          if (!mounted) return;
-                          _showSnack(messenger, tr('msg_share_failed', params: <String, String>{'err': '$err'}));
-                        }
-                      },
-                      onRetryEntry: (e) => unawaited(_analyzeAndRoute(e.url)),
-                      onDeleteEntry: (e, {required deleteFile}) =>
-                          unawaited(ctrl?.deleteVaultEntry(e, deleteFile: deleteFile)),
+                    NavigationDestination(
+                      key: const Key('tab_vault'),
+                      icon: Badge(
+                        isLabelVisible: vaultEntries.isNotEmpty,
+                        label: Text('${vaultEntries.length}'),
+                        child: const Icon(Icons.folder_zip_outlined),
+                      ),
+                      label: tr('tab_vault'),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _selectedTabIndex,
-            onDestinationSelected: (i) => setState(() => _selectedTabIndex = i),
-            destinations: <NavigationDestination>[
-              NavigationDestination(
-                key: const Key('tab_staged'),
-                icon: Badge(isLabelVisible: staged.isNotEmpty, label: Text('${staged.length}'), child: const Icon(Icons.inventory_2_outlined)),
-                label: tr('tab_staged'),
-              ),
-              NavigationDestination(
-                key: const Key('tab_active'),
-                icon: Badge(isLabelVisible: activeJobs.isNotEmpty, label: Text('${activeJobs.length}'), child: const Icon(Icons.bolt_rounded)),
-                label: tr('tab_active'),
-              ),
-              NavigationDestination(
-                key: const Key('tab_vault'),
-                icon: Badge(isLabelVisible: vaultEntries.isNotEmpty, label: Text('${vaultEntries.length}'), child: const Icon(Icons.folder_zip_outlined)),
-                label: tr('tab_vault'),
-              ),
-            ],
-          ),
         );
       },
     );

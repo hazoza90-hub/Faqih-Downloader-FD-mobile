@@ -2,6 +2,7 @@ package com.faqihdownloader.mobile
 
 import android.content.Intent
 import com.faqihdownloader.mobile.bridge.CookiesBridge
+import com.faqihdownloader.mobile.bridge.FloatingCaptureBridge
 import com.faqihdownloader.mobile.bridge.ForegroundServiceBridge
 import com.faqihdownloader.mobile.bridge.MediaStoreBridge
 import com.faqihdownloader.mobile.bridge.ShareIntentBridge
@@ -15,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var shareIntentBridge: ShareIntentBridge? = null
     private var mediaStoreBridge: MediaStoreBridge? = null
     private var cookiesBridge: CookiesBridge? = null
+    private var floatingCaptureBridge: FloatingCaptureBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -28,6 +30,7 @@ class MainActivity : FlutterActivity() {
         }
         mediaStoreBridge = MediaStoreBridge(applicationContext) { this }.apply { attach(messenger) }
         cookiesBridge = CookiesBridge().apply { attach(messenger) }
+        floatingCaptureBridge = FloatingCaptureBridge(applicationContext).apply { attach(messenger) }
     }
 
     @Suppress("DEPRECATION")
@@ -57,11 +60,13 @@ class MainActivity : FlutterActivity() {
         shareIntentBridge?.dispose()
         mediaStoreBridge?.dispose()
         cookiesBridge?.dispose()
+        floatingCaptureBridge?.dispose()
         youtubeDlBridge = null
         foregroundServiceBridge = null
         shareIntentBridge = null
         mediaStoreBridge = null
         cookiesBridge = null
+        floatingCaptureBridge = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

@@ -6,7 +6,7 @@ import '../../app/app_controller.dart';
 import '../../core/i18n/translator.dart';
 import '../../core/theme/app_colors.dart';
 
-/// Top application bar with FD logo, yt-dlp engine status, language toggle, cookies, and settings.
+/// Top application bar with FD logo, yt-dlp engine status, layout switch, language toggle, cookies, and settings.
 class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   const HomeAppBar({
     super.key,
@@ -14,12 +14,16 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
     required this.controller,
     required this.onOpenCookies,
     required this.onOpenSettings,
+    this.isKanbanMode = true,
+    this.onToggleLayoutMode,
   });
 
   final AppTranslator translator;
   final AppController? controller;
   final VoidCallback onOpenCookies;
   final VoidCallback onOpenSettings;
+  final bool isKanbanMode;
+  final VoidCallback? onToggleLayoutMode;
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight);
@@ -31,19 +35,14 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       title: Row(
         children: <Widget>[
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: AppColors.accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.accent.withValues(alpha: 0.4)),
-            ),
-            child: const Center(
-              child: Text(
-                'FD',
-                style: TextStyle(color: AppColors.accent, fontWeight: FontWeight.w800, fontSize: 13),
-              ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.asset(
+              'assets/images/app_icon.png',
+              key: const Key('app_brand_icon'),
+              width: 32,
+              height: 32,
+              fit: BoxFit.cover,
             ),
           ),
           const SizedBox(width: 8),
@@ -75,6 +74,16 @@ class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
         ],
       ),
       actions: <Widget>[
+        if (onToggleLayoutMode != null)
+          IconButton(
+            key: const Key('layout_mode_toggle_button'),
+            tooltip: tr(isKanbanMode ? 'btn_layout_tabs' : 'btn_layout_kanban'),
+            onPressed: onToggleLayoutMode,
+            icon: Icon(
+              isKanbanMode ? Icons.tab_rounded : Icons.view_column_rounded,
+              color: AppColors.accent,
+            ),
+          ),
         TextButton.icon(
           key: const Key('lang_toggle_button'),
           onPressed: () {

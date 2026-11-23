@@ -13,6 +13,9 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     companion object {
         const val METHOD_CHANNEL = "com.faqihdownloader.mobile/share_intent"
         const val EVENT_CHANNEL = "com.faqihdownloader.mobile/share_events"
+
+        @Volatile
+        var activeInstance: ShareIntentBridge? = null
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -24,6 +27,7 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     private var pendingWarmText: String? = null
 
     fun attach(messenger: BinaryMessenger) {
+        activeInstance = this
         methodChannel = MethodChannel(messenger, METHOD_CHANNEL).apply {
             setMethodCallHandler(this@ShareIntentBridge)
         }
@@ -33,6 +37,7 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     }
 
     fun dispose() {
+        if (activeInstance === this) activeInstance = null
         methodChannel?.setMethodCallHandler(null)
         eventChannel?.setStreamHandler(null)
         eventSink = null
@@ -46,6 +51,12 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
 
     fun handleIntent(intent: Intent?) {
         val text = extractSharedText(intent) ?: return
+        deliverText(text)
+    }
+
+    fun deliverText(rawText: String) {
+        val text = rawText.trim()
+        if (text.isEmpty()) return
         val sink = eventSink
         if (sink != null) {
             mainHandler.post { sink.success(text) }
@@ -83,6 +94,10 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
 
     private fun extractSharedText(intent: Intent?): String? {
         if (intent == null) return null
+        if (intent.action == Intent.ACTION_PROCESS_TEXT) {
+            val selected = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()?.trim()
+            return if (selected.isNullOrEmpty()) null else selected
+        }
         if (intent.action != Intent.ACTION_SEND) return null
         val type = intent.type ?: return null
         if (!type.startsWith("text/")) return null

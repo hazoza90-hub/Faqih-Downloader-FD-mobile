@@ -14,6 +14,7 @@ import '../history/history_manager.dart';
 import '../media/ffmpeg_media_processor.dart';
 import '../media/subtitle_font_provisioner.dart';
 import '../media/subtitle_processor.dart';
+import '../resolver/html_download_resolver.dart';
 import 'download_job_models.dart';
 import 'job_export_helper.dart';
 import 'media_post_pipeline.dart';
@@ -30,6 +31,7 @@ class StreamDownloadCoordinator {
     SubtitleFontProvisioner? fontProvisioner,
     DownloadHistoryManager? historyManager,
     DownloadRunnerFactory? runnerFactory,
+    HtmlDownloadResolver? htmlResolver,
     void Function(DownloadJobState state)? onStateChanged,
     DateTime Function()? clock,
   })  : _youtubeDl = youtubeDlChannel ?? YoutubeDlChannel(),
@@ -41,6 +43,9 @@ class StreamDownloadCoordinator {
         _history = historyManager,
         _runnerFactory =
             runnerFactory ?? CoordinatorHelpers.defaultRunnerFactory,
+        _hasCustomRunner = runnerFactory != null,
+        _hasCustomResolver = htmlResolver != null,
+        _htmlResolver = htmlResolver ?? HtmlDownloadResolver(),
         _onStateChanged = onStateChanged,
         _clock = clock ?? (() => DateTime.now().toUtc()),
         _speedLimitBytesPerSec = request.speedLimitBytesPerSec,
@@ -59,6 +64,9 @@ class StreamDownloadCoordinator {
   final SubtitleFontProvisioner _fontProvisioner;
   final DownloadHistoryManager? _history;
   final DownloadRunnerFactory _runnerFactory;
+  final bool _hasCustomRunner;
+  final bool _hasCustomResolver;
+  final HtmlDownloadResolver _htmlResolver;
   final void Function(DownloadJobState state)? _onStateChanged;
   final DateTime Function() _clock;
 
@@ -212,18 +220,36 @@ class StreamDownloadCoordinator {
     String jobDir,
     MediaStreamAcquirer acquirer,
   ) async {
-    final ext = CoordinatorHelpers.extractUrlExtension(request.url);
-    final rawExt = p.extension(request.title).toLowerCase();
-    final displayName = rawExt.isNotEmpty
-        ? sanitizeFilename(request.title, fallback: 'download.$ext')
-        : '${sanitizeFilename(request.title, fallback: 'download')}.$ext';
-    final destPath = p.join(jobDir, displayName);
+    final resolved = (_hasCustomResolver || !_hasCustomRunner)
+        ? await CoordinatorHelpers.resolveDirectTarget(
+            _htmlResolver,
+            url: request.url,
+            headers: request.headers,
+          )
+        : null;
 
+    final effectiveUrl =
+        (resolved != null && resolved.url.isNotEmpty) ? resolved.url : request.url;
+    final effectiveHeaders = resolved != null && resolved.headers.isNotEmpty
+        ? <String, String>{...request.headers, ...resolved.headers}
+        : request.headers;
+    final displayName = CoordinatorHelpers.resolveDirectDisplayName(
+      requestTitle: request.title,
+      requestUrl: request.url,
+      effectiveUrl: effectiveUrl,
+      resolved: resolved,
+    );
+    final resolvedCategory = CoordinatorHelpers.resolveCategory(request, displayName);
+    if (displayName != _state.title || resolvedCategory != _state.category) {
+      _emitState(_state.copyWith(title: displayName, category: resolvedCategory));
+    }
+
+    final destPath = p.join(jobDir, displayName);
     _activeDownloadPhase = DownloadPhase.downloadingDirect;
     await acquirer.runTurboTransfer(
-      url: request.url,
+      url: effectiveUrl,
       destinationPath: destPath,
-      headers: request.headers,
+      headers: effectiveHeaders,
       maxConnections: request.maxConnections,
       speedLimitBytesPerSec: _speedLimitBytesPerSec.toDouble(),
       phase: DownloadPhase.downloadingDirect,
@@ -237,8 +263,8 @@ class StreamDownloadCoordinator {
     return ExportPlan(
       sourcePath: destPath,
       displayName: displayName,
-      ext: finalExt.isEmpty ? ext : finalExt,
-      category: CoordinatorHelpers.resolveCategory(request, displayName),
+      ext: finalExt.isEmpty ? CoordinatorHelpers.extractUrlExtension(effectiveUrl) : finalExt,
+      category: resolvedCategory,
     );
   }
 

@@ -144,23 +144,27 @@ class _VaultTabState extends State<VaultTab> {
             ),
           ),
         ),
-        SizedBox(
-          height: 38,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: PhaseLabelHelper.vaultCategories.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 6),
-            itemBuilder: (context, index) {
-              final cat = PhaseLabelHelper.vaultCategories[index];
-              final selected = _selectedCategory == cat;
-              return FilterChip(
-                key: Key('vault_cat_$cat'),
-                label: Text(tr(PhaseLabelHelper.categoryKey(cat))),
-                selected: selected,
-                onSelected: (_) => setState(() => _selectedCategory = cat),
-              );
-            },
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: SizedBox(
+            width: double.infinity,
+            child: Wrap(
+              spacing: 5,
+              runSpacing: 4,
+              children: PhaseLabelHelper.vaultCategories.map((cat) {
+                return FilterChip(
+                  key: Key('vault_cat_$cat'),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    tr(PhaseLabelHelper.categoryKey(cat)),
+                    style: const TextStyle(fontSize: 11.5),
+                  ),
+                  selected: _selectedCategory == cat,
+                  onSelected: (_) => setState(() => _selectedCategory = cat),
+                );
+              }).toList(growable: false),
+            ),
           ),
         ),
         const SizedBox(height: 6),
@@ -214,43 +218,57 @@ class _VaultTabState extends State<VaultTab> {
                           style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
                         ),
                       ],
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: <Widget>[
-                          if (ok) ...<Widget>[
+                      SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          spacing: 2,
+                          children: <Widget>[
+                            if (ok) ...<Widget>[
+                              IconButton(
+                                key: Key('vault_open_${entry.id}'),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                tooltip: tr('btn_open'),
+                                onPressed: () => widget.onOpenEntry(entry),
+                                icon: const Icon(Icons.open_in_new_rounded, size: 19, color: AppColors.accent),
+                              ),
+                              IconButton(
+                                key: Key('vault_share_${entry.id}'),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                tooltip: tr('btn_share'),
+                                onPressed: () => widget.onShareEntry(entry),
+                                icon: const Icon(Icons.share_outlined, size: 19, color: AppColors.accent),
+                              ),
+                            ] else
+                              IconButton(
+                                key: Key('vault_retry_${entry.id}'),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                tooltip: tr('btn_retry'),
+                                onPressed: () => widget.onRetryEntry(entry),
+                                icon: const Icon(Icons.refresh_rounded, size: 19, color: AppColors.warning),
+                              ),
+                            if (entry.filePath.isNotEmpty)
+                              IconButton(
+                                key: Key('vault_copy_path_${entry.id}'),
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                tooltip: tr('btn_copy_path'),
+                                onPressed: () => unawaited(_copyPath(entry)),
+                                icon: const Icon(Icons.copy_rounded, size: 18, color: AppColors.textSecondary),
+                              ),
                             IconButton(
-                              key: Key('vault_open_${entry.id}'),
-                              tooltip: tr('btn_open'),
-                              onPressed: () => widget.onOpenEntry(entry),
-                              icon: const Icon(Icons.open_in_new_rounded, size: 20, color: AppColors.accent),
+                              key: Key('vault_delete_${entry.id}'),
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              tooltip: tr('btn_delete'),
+                              onPressed: () => unawaited(_confirmDelete(entry)),
+                              icon: const Icon(Icons.delete_outline_rounded, size: 19, color: AppColors.danger),
                             ),
-                            IconButton(
-                              key: Key('vault_share_${entry.id}'),
-                              tooltip: tr('btn_share'),
-                              onPressed: () => widget.onShareEntry(entry),
-                              icon: const Icon(Icons.share_outlined, size: 20, color: AppColors.accent),
-                            ),
-                          ] else
-                            IconButton(
-                              key: Key('vault_retry_${entry.id}'),
-                              tooltip: tr('btn_retry'),
-                              onPressed: () => widget.onRetryEntry(entry),
-                              icon: const Icon(Icons.refresh_rounded, size: 20, color: AppColors.warning),
-                            ),
-                          if (entry.filePath.isNotEmpty)
-                            IconButton(
-                              key: Key('vault_copy_path_${entry.id}'),
-                              tooltip: tr('btn_copy_path'),
-                              onPressed: () => unawaited(_copyPath(entry)),
-                              icon: const Icon(Icons.copy_rounded, size: 19, color: AppColors.textSecondary),
-                            ),
-                          IconButton(
-                            key: Key('vault_delete_${entry.id}'),
-                            tooltip: tr('btn_delete'),
-                            onPressed: () => unawaited(_confirmDelete(entry)),
-                            icon: const Icon(Icons.delete_outline_rounded, size: 20, color: AppColors.danger),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),

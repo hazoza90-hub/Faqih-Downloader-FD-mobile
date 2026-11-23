@@ -249,6 +249,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 translator: widget.translator,
                 settings: s,
                 onChanged: (next) => widget.controller.updateSettings(next),
+                onToggleFloatingCapture: (v) async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final ok = await widget.controller.setFloatingCaptureEnabled(v);
+                  if (!ok && mounted) {
+                    _showSnack(messenger, tr('msg_overlay_permission_needed'));
+                  }
+                },
               ),
               const SizedBox(height: 14),
               _SectionTitle(tr('media_prefs_section')),

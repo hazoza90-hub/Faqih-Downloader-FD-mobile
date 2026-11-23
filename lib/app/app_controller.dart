@@ -10,9 +10,9 @@ import '../core/config/settings_repository.dart';
 import '../core/i18n/translator.dart';
 import '../core/models/history_entry.dart';
 import '../core/models/subtitle_track.dart';
-import '../core/utils/filename_sanitizer.dart';
 import '../core/utils/url_detector.dart';
 import '../platform/cookies_channel.dart';
+import '../platform/floating_capture_channel.dart';
 import '../platform/foreground_service_channel.dart';
 import '../platform/media_store_channel.dart';
 import '../platform/native_models.dart';
@@ -25,6 +25,8 @@ import '../services/history/history_manager.dart';
 import '../services/history/history_storage.dart';
 import '../services/media/ffmpeg_media_processor.dart';
 import '../services/media/media_extractor_service.dart';
+import '../services/resolver/html_download_resolver.dart';
+import '../services/resolver/smart_url_analyzer.dart';
 import '../services/updater/github_release_updater.dart';
 import 'vault_storage_actions.dart';
 
@@ -43,6 +45,8 @@ class AppController extends ChangeNotifier {
     MediaStoreChannel? mediaStoreChannel,
     ForegroundServiceChannel? foregroundServiceChannel,
     CookiesChannel? cookiesChannel,
+    FloatingCaptureChannel? floatingCaptureChannel,
+    HtmlDownloadResolver? htmlResolver,
     GitHubReleaseUpdater? updater,
     this.autoInitNative = true,
   })  : _settingsRepo = settingsRepository,
@@ -55,6 +59,8 @@ class AppController extends ChangeNotifier {
         _mediaStore = mediaStoreChannel ?? MediaStoreChannel(),
         _foregroundService = foregroundServiceChannel ?? ForegroundServiceChannel(),
         _cookies = cookiesChannel ?? CookiesChannel(),
+        _floatingCapture = floatingCaptureChannel ?? FloatingCaptureChannel(),
+        _htmlResolver = htmlResolver ?? HtmlDownloadResolver(),
         _updater = updater ??
             GitHubReleaseUpdater(
               mediaStoreChannel: mediaStoreChannel ?? MediaStoreChannel(),
@@ -68,7 +74,14 @@ class AppController extends ChangeNotifier {
   final MediaStoreChannel _mediaStore;
   final ForegroundServiceChannel _foregroundService;
   final CookiesChannel _cookies;
+  final FloatingCaptureChannel _floatingCapture;
+  final HtmlDownloadResolver _htmlResolver;
   final GitHubReleaseUpdater _updater;
+
+  late final SmartUrlAnalyzer _analyzer = SmartUrlAnalyzer(
+    extractor: _extractor,
+    htmlResolver: _htmlResolver,
+  );
 
   SettingsRepository? _settingsRepo;
   DownloadHistoryManager? _history;
@@ -90,6 +103,7 @@ class AppController extends ChangeNotifier {
   late final VaultStorageActions _vaultActions = VaultStorageActions(
     mediaStore: _mediaStore,
     cookies: _cookies,
+    floatingCapture: _floatingCapture,
     historyProvider: () => _history,
     settingsProvider: () => _settings,
     saveSettings: updateSettings,
@@ -179,25 +193,23 @@ class AppController extends ChangeNotifier {
       _ytdlpVersion = status.ytdlpVersion;
       notifyListeners();
     } catch (_) {}
+    await _vaultActions.syncFloatingCaptureOnBoot(
+      title: translator.tr('notif_capture_title'),
+      body: translator.tr('notif_capture_body'),
+      captureLabel: translator.tr('notif_capture_btn'),
+      stopLabel: translator.tr('notif_capture_stop'),
+      emptyClipboardMsg: translator.tr('msg_capture_no_url'),
+    );
   }
 
   Future<UrlAnalysisResult> analyzeUrl(String rawUrl) async {
     final url = rawUrl.trim();
-    if (!UrlDetector.isMediaUrl(url)) {
-      return UrlAnalysisResult(url: url);
-    }
     final pid = 'extract_${DateTime.now().microsecondsSinceEpoch}';
     _activeExtractProcessId = pid;
     _isExtracting = true;
     notifyListeners();
     try {
-      final cookies = _effectiveCookiesFile();
-      final info = await _extractor.extractInfo(
-        url,
-        cookiesFile: cookies,
-        processId: pid,
-      );
-      return UrlAnalysisResult(url: url, mediaInfo: info);
+      return await _analyzer.analyze(url, cookiesFile: _effectiveCookiesFile(), processId: pid);
     } finally {
       if (_activeExtractProcessId == pid) _activeExtractProcessId = null;
       _isExtracting = false;
@@ -265,8 +277,12 @@ class AppController extends ChangeNotifier {
     );
   }
 
-  DownloadJobState enqueueDirectDownload(String url, {String? customTitle}) =>
-      _enqueueBasicRequest(url, customTitle: customTitle);
+  DownloadJobState enqueueDirectDownload(
+    String url, {
+    String? customTitle,
+    Map<String, String> headers = const <String, String>{},
+  }) =>
+      _enqueueBasicRequest(url, customTitle: customTitle, headers: headers);
 
   DownloadJobState _enqueueBasicRequest(
     String url, {
@@ -274,32 +290,21 @@ class AppController extends ChangeNotifier {
     int durationSec = 0,
     bool forceMediaPipeline = false,
     int preferredVideoHeight = 0,
+    Map<String, String> headers = const <String, String>{},
   }) {
     final trimmed = url.trim();
     _stagedUrls.remove(trimmed);
     _stagedUrls.remove(url);
-    final uri = Uri.tryParse(trimmed);
-    final rawName = (customTitle?.trim().isNotEmpty ?? false)
-        ? customTitle!.trim()
-        : (uri != null && uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download');
-    final safeTitle = sanitizeFilename(rawName, fallback: 'download');
-    final id = 'job_${DateTime.now().millisecondsSinceEpoch}_${++_jobCounter}';
-    final req = DownloadJobRequest(
-      id: id,
+    final req = VaultStorageActions.buildBasicRequest(
+      id: 'job_${DateTime.now().millisecondsSinceEpoch}_${++_jobCounter}',
       url: trimmed,
-      title: safeTitle,
-      maxConnections: _settings.maxConnections,
-      speedLimitBytesPerSec: _settings.speedLimitBytesPerSec,
-      cookiesFile: _effectiveCookiesFile(),
-      platform: UrlDetector.extractMediaPlatform(trimmed) ??
-          (forceMediaPipeline ? 'Media' : 'Direct'),
+      settings: _settings,
+      customTitle: customTitle,
       durationSec: durationSec,
-      customSaveTreeUri: _settings.customSaveTreeUri,
-      autoCategorizeFolders: _settings.autoCategorizeFolders,
-      subtitlePosition: _settings.subtitlePosition,
-      subtitleFontSize: _settings.subtitleFontSize,
       forceMediaPipeline: forceMediaPipeline,
       preferredVideoHeight: preferredVideoHeight,
+      headers: headers,
+      cookiesFile: _effectiveCookiesFile(),
     );
     return _queue!.enqueue(req);
   }
@@ -309,30 +314,14 @@ class AppController extends ChangeNotifier {
     final id = request.id.trim().isEmpty
         ? 'job_${DateTime.now().millisecondsSinceEpoch}_${++_jobCounter}'
         : request.id;
-    final effective = DownloadJobRequest(
-      id: id,
-      url: request.url,
-      title: request.title,
-      selectedVideoFormat: request.selectedVideoFormat,
-      selectedAudioTrack: request.selectedAudioTrack,
-      selectedSubtitle: request.selectedSubtitle,
-      subtitleMode: request.subtitleMode,
-      audioOnly: request.audioOnly,
-      audioFormat: request.audioFormat,
-      clipRange: request.clipRange,
-      headers: request.headers,
-      cookiesFile: request.cookiesFile ?? _effectiveCookiesFile(),
-      maxConnections: _settings.maxConnections,
-      speedLimitBytesPerSec: _settings.speedLimitBytesPerSec,
-      categorySubFolder: request.categorySubFolder,
-      platform: request.platform,
-      durationSec: request.durationSec,
-      customSaveTreeUri: _settings.customSaveTreeUri,
-      autoCategorizeFolders: _settings.autoCategorizeFolders,
-      subtitlePosition: _settings.subtitlePosition,
-      subtitleFontSize: _settings.subtitleFontSize,
+    return _queue!.enqueue(
+      VaultStorageActions.buildMediaRequest(
+        id: id,
+        request: request,
+        settings: _settings,
+        effectiveCookiesFile: _effectiveCookiesFile(),
+      ),
     );
-    return _queue!.enqueue(effective);
   }
 
   Future<void> updateSettings(AppSettings next) async {
@@ -371,6 +360,14 @@ class AppController extends ChangeNotifier {
   Future<SubtitleTrack?> pickExternalSubtitleFile() => _vaultActions.pickExternalSubtitleFile();
   Future<void> requestNotificationPermissionOnce() =>
       _vaultActions.requestNotificationPermissionOnce();
+  Future<bool> setFloatingCaptureEnabled(bool enabled) => _vaultActions.setFloatingCaptureEnabled(
+        enabled,
+        title: translator.tr('notif_capture_title'),
+        body: translator.tr('notif_capture_body'),
+        captureLabel: translator.tr('notif_capture_btn'),
+        stopLabel: translator.tr('notif_capture_stop'),
+        emptyClipboardMsg: translator.tr('msg_capture_no_url'),
+      );
 
   String? _effectiveCookiesFile() {
     final path = _settings.cookiesFilePath.trim();

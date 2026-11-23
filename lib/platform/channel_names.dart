@@ -14,4 +14,5 @@ abstract final class ChannelNames {
 
   static const String mediaStore = 'com.faqihdownloader.mobile/media_store';
   static const String cookies = 'com.faqihdownloader.mobile/cookies';
+  static const String floatingCapture = 'com.faqihdownloader.mobile/floating_capture';
 }

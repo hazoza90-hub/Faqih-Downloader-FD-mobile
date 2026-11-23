@@ -5,17 +5,29 @@ import '../core/config/app_settings.dart';
 import '../core/models/history_entry.dart';
 import '../core/models/subtitle_track.dart';
 import '../core/models/youtube_stream_info.dart';
+import '../core/utils/filename_sanitizer.dart';
+import '../core/utils/url_detector.dart';
 import '../platform/cookies_channel.dart';
+import '../platform/floating_capture_channel.dart';
 import '../platform/media_store_channel.dart';
+import '../services/coordinator/download_job_models.dart';
 import '../services/coordinator/job_export_helper.dart';
 import '../services/history/history_manager.dart';
 
 /// Result returned when analyzing a user URL (either direct HTTP or rich media info).
 @immutable
 class UrlAnalysisResult {
-  const UrlAnalysisResult({required this.url, this.mediaInfo});
+  const UrlAnalysisResult({
+    required this.url,
+    this.mediaInfo,
+    this.resolvedFilename,
+    this.resolvedHeaders = const <String, String>{},
+  });
+
   final String url;
   final YouTubeStreamInfo? mediaInfo;
+  final String? resolvedFilename;
+  final Map<String, String> resolvedHeaders;
   bool get isMedia => mediaInfo != null;
 }
 
@@ -24,17 +36,20 @@ class VaultStorageActions {
   VaultStorageActions({
     required MediaStoreChannel mediaStore,
     required CookiesChannel cookies,
+    FloatingCaptureChannel? floatingCapture,
     required DownloadHistoryManager? Function() historyProvider,
     required AppSettings Function() settingsProvider,
     required Future<void> Function(AppSettings next) saveSettings,
   })  : _mediaStore = mediaStore,
         _cookies = cookies,
+        _floatingCapture = floatingCapture ?? FloatingCaptureChannel(),
         _historyProvider = historyProvider,
         _settingsProvider = settingsProvider,
         _saveSettings = saveSettings;
 
   final MediaStoreChannel _mediaStore;
   final CookiesChannel _cookies;
+  final FloatingCaptureChannel _floatingCapture;
   final DownloadHistoryManager? Function() _historyProvider;
   final AppSettings Function() _settingsProvider;
   final Future<void> Function(AppSettings next) _saveSettings;
@@ -119,4 +134,119 @@ class VaultStorageActions {
     _notifRequested = true;
     await _mediaStore.requestNotificationPermission();
   }
+
+  Future<bool> setFloatingCaptureEnabled(
+    bool enabled, {
+    required String title,
+    required String body,
+    required String captureLabel,
+    required String stopLabel,
+    required String emptyClipboardMsg,
+  }) async {
+    if (!enabled) {
+      await _floatingCapture.stopFloatingCapture().catchError((_) => false);
+      await _saveSettings(_settingsProvider().copyWith(floatingCaptureEnabled: false));
+      return true;
+    }
+    final allowed = await _floatingCapture.canDrawOverlays();
+    if (!allowed) {
+      await _floatingCapture.requestOverlayPermission();
+      return false;
+    }
+    await _floatingCapture.startFloatingCapture(
+      title: title,
+      body: body,
+      captureLabel: captureLabel,
+      stopLabel: stopLabel,
+      emptyClipboardMsg: emptyClipboardMsg,
+    );
+    await _saveSettings(_settingsProvider().copyWith(floatingCaptureEnabled: true));
+    return true;
+  }
+
+  Future<void> syncFloatingCaptureOnBoot({
+    required String title,
+    required String body,
+    required String captureLabel,
+    required String stopLabel,
+    required String emptyClipboardMsg,
+  }) async {
+    if (!_settingsProvider().floatingCaptureEnabled) return;
+    try {
+      final allowed = await _floatingCapture.canDrawOverlays();
+      if (!allowed) return;
+      await _floatingCapture.startFloatingCapture(
+        title: title,
+        body: body,
+        captureLabel: captureLabel,
+        stopLabel: stopLabel,
+        emptyClipboardMsg: emptyClipboardMsg,
+      );
+    } catch (_) {}
+  }
+
+  static DownloadJobRequest buildBasicRequest({
+    required String id,
+    required String url,
+    required AppSettings settings,
+    String? customTitle,
+    int durationSec = 0,
+    bool forceMediaPipeline = false,
+    int preferredVideoHeight = 0,
+    Map<String, String> headers = const <String, String>{},
+    String? cookiesFile,
+  }) {
+    final trimmed = url.trim();
+    final uri = Uri.tryParse(trimmed);
+    final rawName = (customTitle?.trim().isNotEmpty ?? false)
+        ? customTitle!.trim()
+        : (uri != null && uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'download');
+    return DownloadJobRequest(
+      id: id,
+      url: trimmed,
+      title: sanitizeFilename(rawName, fallback: 'download'),
+      headers: headers,
+      maxConnections: settings.maxConnections,
+      speedLimitBytesPerSec: settings.speedLimitBytesPerSec,
+      cookiesFile: cookiesFile,
+      platform: UrlDetector.extractMediaPlatform(trimmed) ?? (forceMediaPipeline ? 'Media' : 'Direct'),
+      durationSec: durationSec,
+      customSaveTreeUri: settings.customSaveTreeUri,
+      autoCategorizeFolders: settings.autoCategorizeFolders,
+      subtitlePosition: settings.subtitlePosition,
+      subtitleFontSize: settings.subtitleFontSize,
+      forceMediaPipeline: forceMediaPipeline,
+      preferredVideoHeight: preferredVideoHeight,
+    );
+  }
+
+  static DownloadJobRequest buildMediaRequest({
+    required String id,
+    required DownloadJobRequest request,
+    required AppSettings settings,
+    String? effectiveCookiesFile,
+  }) =>
+      DownloadJobRequest(
+        id: id,
+        url: request.url,
+        title: request.title,
+        selectedVideoFormat: request.selectedVideoFormat,
+        selectedAudioTrack: request.selectedAudioTrack,
+        selectedSubtitle: request.selectedSubtitle,
+        subtitleMode: request.subtitleMode,
+        audioOnly: request.audioOnly,
+        audioFormat: request.audioFormat,
+        clipRange: request.clipRange,
+        headers: request.headers,
+        cookiesFile: request.cookiesFile ?? effectiveCookiesFile,
+        maxConnections: settings.maxConnections,
+        speedLimitBytesPerSec: settings.speedLimitBytesPerSec,
+        categorySubFolder: request.categorySubFolder,
+        platform: request.platform,
+        durationSec: request.durationSec,
+        customSaveTreeUri: settings.customSaveTreeUri,
+        autoCategorizeFolders: settings.autoCategorizeFolders,
+        subtitlePosition: settings.subtitlePosition,
+        subtitleFontSize: settings.subtitleFontSize,
+      );
 }
