@@ -145,6 +145,7 @@ Future<void> analyzeAndRouteUrl({
       result.url,
       customTitle: result.resolvedFilename,
       headers: result.resolvedHeaders,
+      skipHtmlResolve: true,
     );
     onSelectColumn(1);
     showImmediateSnack(

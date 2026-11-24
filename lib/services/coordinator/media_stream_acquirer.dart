@@ -6,11 +6,14 @@ import 'package:path/path.dart' as p;
 import '../../core/models/audio_track.dart';
 import '../../core/models/download_status.dart';
 import '../../core/models/video_format_option.dart';
+import '../../core/models/youtube_stream_info.dart';
+import '../../core/utils/url_detector.dart';
 import '../../engine/engine_callbacks.dart';
 import '../../engine/http_client_factory.dart';
 import '../../engine/isolate_download_runner.dart';
 import '../../platform/youtube_dl_channel.dart';
 import '../media/media_exceptions.dart';
+import '../media/youtube_innertube_extractor.dart';
 import 'download_job_models.dart';
 import 'ytdlp_stream_downloader.dart';
 
@@ -41,11 +44,14 @@ class MediaStreamAcquirer {
   MediaStreamAcquirer({
     required YoutubeDlChannel youtubeDl,
     required DownloadRunnerFactory runnerFactory,
+    YouTubeInnerTubeExtractor? innerTubeExtractor,
   })  : _ytDlpDownloader = YtDlpStreamDownloader(youtubeDl),
-        _runnerFactory = runnerFactory;
+        _runnerFactory = runnerFactory,
+        _innerTube = innerTubeExtractor ?? YouTubeInnerTubeExtractor();
 
   final YtDlpStreamDownloader _ytDlpDownloader;
   final DownloadRunnerFactory _runnerFactory;
+  final YouTubeInnerTubeExtractor _innerTube;
 
   Future<void> runTurboTransfer({
     required String url,
@@ -119,8 +125,28 @@ class MediaStreamAcquirer {
     required void Function(DownloadPhase phase, double progress, double eta)
         onYtDlpProgress,
   }) async {
-    final fmt = request.selectedVideoFormat;
-    final audio = request.selectedAudioTrack ?? fmt?.selectedAudioTrack;
+    var fmt = request.selectedVideoFormat;
+    var audio = request.selectedAudioTrack ?? fmt?.selectedAudioTrack;
+
+    if (fmt == null &&
+        !request.audioOnly &&
+        UrlDetector.extractYouTubeId(request.url) != null &&
+        !request.url.toLowerCase().contains('/playlist?')) {
+      final fast = await _innerTube.extract(request.url);
+      if (isCancelled()) {
+        throw const MediaExtractionException(
+          kind: MediaErrorKind.cancelled,
+          message: 'Download cancelled',
+        );
+      }
+      final picked = fast == null
+          ? null
+          : _pickInnerTubeFormat(fast, request.preferredVideoHeight);
+      if (picked != null) {
+        fmt = picked;
+        audio ??= picked.selectedAudioTrack ?? fast!.selectedAudioTrack;
+      }
+    }
 
     if (canTryTurbo(request, fmt, audio)) {
       try {
@@ -279,6 +305,22 @@ class MediaStreamAcquirer {
         }
       }
     } catch (_) {}
+  }
+
+  static VideoFormatOption? _pickInnerTubeFormat(
+    YouTubeStreamInfo info,
+    int preferredHeight,
+  ) {
+    final direct = info.videoFormats
+        .where((f) => f.isDirectTurboSupported && !isManifestUrl(f.videoUrl, protocol: f.protocol))
+        .toList(growable: false);
+    if (direct.isEmpty) return null;
+    if (preferredHeight > 0) {
+      for (final f in direct) {
+        if (f.height > 0 && f.height <= preferredHeight) return f;
+      }
+    }
+    return direct.first;
   }
 
   static bool canTryTurbo(

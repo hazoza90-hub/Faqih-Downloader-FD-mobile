@@ -85,6 +85,7 @@ class DownloadJobRequest {
     this.subtitleFontSize = 20,
     this.forceMediaPipeline = false,
     this.preferredVideoHeight = 0,
+    this.skipHtmlResolve = false,
   });
 
   final String id;
@@ -110,6 +111,7 @@ class DownloadJobRequest {
   final int subtitleFontSize;
   final bool forceMediaPipeline;
   final int preferredVideoHeight;
+  final bool skipHtmlResolve;
 
   bool get isMediaJob =>
       selectedVideoFormat != null ||
@@ -123,6 +125,7 @@ class DownloadJobRequest {
     int? maxConnections,
     bool? forceMediaPipeline,
     int? preferredVideoHeight,
+    bool? skipHtmlResolve,
   }) {
     return DownloadJobRequest(
       id: id,
@@ -149,6 +152,7 @@ class DownloadJobRequest {
       subtitleFontSize: subtitleFontSize,
       forceMediaPipeline: forceMediaPipeline ?? this.forceMediaPipeline,
       preferredVideoHeight: preferredVideoHeight ?? this.preferredVideoHeight,
+      skipHtmlResolve: skipHtmlResolve ?? this.skipHtmlResolve,
     );
   }
 }

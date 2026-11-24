@@ -30,6 +30,7 @@ class MediaExtractorService {
   final YouTubeInnerTubeExtractor _innerTube;
   final DateTime Function() _clock;
   final Set<String> _cancelledIds = <String>{};
+  final Map<String, void Function()> _activeAborters = <String, void Function()>{};
   final Map<String, ({YouTubeStreamInfo info, DateTime cachedAt})> _cache =
       <String, ({YouTubeStreamInfo info, DateTime cachedAt})>{};
   bool _autoUpdatedThisSession = false;
@@ -86,7 +87,7 @@ class MediaExtractorService {
     final effectiveId =
         processId ?? 'extract_${DateTime.now().microsecondsSinceEpoch}';
     final trimmedPlaylist = playlistItems?.trim() ?? '';
-    final cacheKey = '$cleanUrl|$trimmedPlaylist';
+    final cacheKey = '$cleanUrl|$trimmedPlaylist|${cookiesFile?.trim() ?? ''}';
 
     try {
       _throwIfCancelled(effectiveId);
@@ -97,7 +98,11 @@ class MediaExtractorService {
           !cleanUrl.toLowerCase().contains('/playlist?') &&
           trimmedPlaylist.isEmpty;
       if (isSingleYouTube) {
-        final fast = await _innerTube.extract(cleanUrl);
+        final fast = await _innerTube.extract(
+          cleanUrl,
+          onRegisterAbort: (aborter) => _activeAborters[effectiveId] = aborter,
+        );
+        _activeAborters.remove(effectiveId);
         _throwIfCancelled(effectiveId);
         if (fast != null && _hasUsableStreams(fast)) {
           _writeCache(cacheKey, fast);
@@ -154,6 +159,7 @@ class MediaExtractorService {
       if (firstPass.bestPartial != null) return firstPass.bestPartial!;
       throw firstPass.lastError!;
     } finally {
+      _activeAborters.remove(effectiveId);
       _cancelledIds.remove(effectiveId);
     }
   }
@@ -217,7 +223,7 @@ class MediaExtractorService {
             headers: headers,
             playlistItems: playlistItems,
             timeoutSeconds: timeoutSeconds,
-            extractorArgs: null,
+            extractorArgs: 'youtube:player_client=mweb,web',
           );
           if (_hasUsableStreams(info)) {
             return (usable: info, bestPartial: bestResult, lastError: lastError);
@@ -329,6 +335,7 @@ class MediaExtractorService {
 
   Future<bool> cancelExtraction(String processId) {
     _cancelledIds.add(processId);
+    _activeAborters.remove(processId)?.call();
     return _channel.cancelProcess(processId);
   }
 

@@ -21,7 +21,10 @@ class _NullInnerTubeExtractor extends YouTubeInnerTubeExtractor {
   int calls = 0;
 
   @override
-  Future<YouTubeStreamInfo?> extract(String url) async {
+  Future<YouTubeStreamInfo?> extract(
+    String url, {
+    void Function(void Function() aborter)? onRegisterAbort,
+  }) async {
     calls++;
     return null;
   }
@@ -278,7 +281,7 @@ void main() {
       ]);
       expect(seenCalls.take(3).every((c) => c.cookies == null), isTrue);
       expect(seenCalls[3].cookies, '/tmp/cookies.txt');
-      expect(seenCalls[3].strategy, isNull);
+      expect(seenCalls[3].strategy, 'youtube:player_client=mweb,web');
     });
 
     test('3) In-memory extraction cache hits immediately, expires after 3 minutes, and caps at 25 entries', () async {

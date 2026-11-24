@@ -44,16 +44,26 @@ class YouTubeInnerTubeExtractor {
   final Duration _timeout;
 
   /// Extracts ranked streams for a single YouTube video URL, or returns `null`.
-  Future<YouTubeStreamInfo?> extract(String url) async {
+  Future<YouTubeStreamInfo?> extract(
+    String url, {
+    void Function(void Function() aborter)? onRegisterAbort,
+  }) async {
     final cleanUrl = url.trim();
     if (cleanUrl.toLowerCase().contains('/playlist?')) return null;
     final videoId = UrlDetector.extractYouTubeId(cleanUrl);
     if (videoId == null) return null;
 
     HttpClient? client;
+    var aborted = false;
+    onRegisterAbort?.call(() {
+      aborted = true;
+      client?.close(force: true);
+    });
     try {
+      if (aborted) return null;
       client = _httpClientFactory?.call() ??
           HttpClientFactory.create(connectionTimeout: _timeout, idleTimeout: _timeout);
+      if (aborted) return null;
       final req = await client.postUrl(_endpoint).timeout(_timeout);
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
       req.headers.set(HttpHeaders.userAgentHeader, androidVrUserAgent);
@@ -66,12 +76,12 @@ class YouTubeInnerTubeExtractor {
         'context': const <String, Object?>{'client': _vrClient},
       }));
       final resp = await req.close().timeout(_timeout);
-      if (resp.statusCode != HttpStatus.ok) {
+      if (aborted || resp.statusCode != HttpStatus.ok) {
         await resp.drain<void>().catchError((_) {});
         return null;
       }
       final decoded = jsonDecode(await utf8.decodeStream(resp).timeout(_timeout));
-      if (decoded is! Map) return null;
+      if (aborted || decoded is! Map) return null;
       return parsePlayerResponse(
         Map<String, dynamic>.from(decoded),
         videoId,
@@ -122,7 +132,7 @@ class YouTubeInnerTubeExtractor {
     };
 
     final info = _ranker.parse(normalized, fallbackUrl: fallbackUrl ?? watchUrl);
-    return (info.videoFormats.isEmpty && info.audioTracks.isEmpty) ? null : info;
+    return info.videoFormats.isEmpty ? null : info;
   }
 
   void _collectFormats(Object? rawList, {required bool progressive, required List<Map<String, dynamic>> out}) {
@@ -136,13 +146,9 @@ class YouTubeInnerTubeExtractor {
       final tbrKbps = bitrate > 0 ? bitrate / 1000.0 : 0.0;
       final contentLen = int.tryParse('${raw['contentLength'] ?? ''}');
       final qualityNote = (raw['qualityLabel'] ?? raw['quality'] ?? '').toString().trim();
-
       final fmt = <String, dynamic>{
-        'format_id': '${raw['itag'] ?? ''}',
-        'url': url,
-        'ext': parsedMime.ext,
-        'vcodec': parsedMime.vcodec,
-        'acodec': parsedMime.acodec,
+        'format_id': '${raw['itag'] ?? ''}', 'url': url, 'ext': parsedMime.ext,
+        'vcodec': parsedMime.vcodec, 'acodec': parsedMime.acodec,
         if (raw['width'] != null) 'width': raw['width'],
         if (raw['height'] != null) 'height': raw['height'],
         if (raw['fps'] != null) 'fps': raw['fps'],
@@ -228,11 +234,7 @@ class YouTubeInnerTubeExtractor {
       if (nameObj is Map) {
         name = nameObj['simpleText']?.toString().trim() ?? '';
         if (name.isEmpty && nameObj['runs'] is List) {
-          name = (nameObj['runs'] as List)
-              .whereType<Map>()
-              .map((r) => r['text']?.toString() ?? '')
-              .join()
-              .trim();
+          name = (nameObj['runs'] as List).whereType<Map>().map((r) => r['text']?.toString() ?? '').join().trim();
         }
       }
       final isAuto = raw['kind']?.toString().toLowerCase() == 'asr';

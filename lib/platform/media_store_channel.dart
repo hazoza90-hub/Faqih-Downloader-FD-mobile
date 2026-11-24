@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 
 import 'channel_names.dart';
@@ -6,12 +8,19 @@ import 'native_models.dart';
 /// Typed Dart bridge for Android scoped Downloads export, work dir, and file opening.
 class MediaStoreChannel {
   MediaStoreChannel({MethodChannel? methodChannel})
-      : _methodChannel =
+      : _isDefaultChannel = methodChannel == null,
+        _methodChannel =
             methodChannel ?? const MethodChannel(ChannelNames.mediaStore);
 
+  static String? _defaultWorkDirCache;
+
+  final bool _isDefaultChannel;
   final MethodChannel _methodChannel;
+  String? _cachedWorkDir;
 
   Future<String> getAppWorkDir() async {
+    final cached = _cachedWorkDir ?? (_isDefaultChannel ? _defaultWorkDirCache : null);
+    if (cached != null && Directory(cached).existsSync()) return cached;
     try {
       final path = await _methodChannel.invokeMethod<String>('getAppWorkDir');
       if (path == null || path.trim().isEmpty) {
@@ -20,6 +29,8 @@ class MediaStoreChannel {
           'Native side returned an empty work directory path',
         );
       }
+      _cachedWorkDir = path;
+      if (_isDefaultChannel) _defaultWorkDirCache = path;
       return path;
     } on PlatformException catch (e) {
       throw NativeBridgeException(e.code, e.message ?? 'Platform error', e.details);

@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import '../../core/models/download_status.dart';
 import '../../core/utils/category_classifier.dart';
 import '../../core/utils/filename_sanitizer.dart';
+import '../../core/utils/url_detector.dart';
 import '../../engine/engine_callbacks.dart';
 import '../../engine/isolate_download_runner.dart';
 import '../../platform/media_store_channel.dart';
@@ -92,7 +93,7 @@ class StreamDownloadCoordinator {
       await Directory(jobDir).create(recursive: true);
 
       _emitState(_state.copyWith(phase: DownloadPhase.probing, progress: 0.0));
-      await _saveHistory(DownloadStatus.probing);
+      unawaited(_saveHistory(DownloadStatus.probing).catchError((_) {}));
 
       final acquirer = MediaStreamAcquirer(
         youtubeDl: _youtubeDl,
@@ -220,7 +221,9 @@ class StreamDownloadCoordinator {
     String jobDir,
     MediaStreamAcquirer acquirer,
   ) async {
-    final resolved = (_hasCustomResolver || !_hasCustomRunner)
+    final skipResolve =
+        request.skipHtmlResolve || UrlDetector.isDirectDownloadUrl(request.url);
+    final resolved = (!skipResolve && (_hasCustomResolver || !_hasCustomRunner))
         ? await CoordinatorHelpers.resolveDirectTarget(
             _htmlResolver,
             url: request.url,

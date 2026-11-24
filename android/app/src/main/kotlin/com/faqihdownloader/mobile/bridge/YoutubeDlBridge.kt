@@ -157,15 +157,13 @@ class YoutubeDlBridge(private val appContext: Context) :
         runAsync(result) {
             ensureYoutubeDlInitialized()
             val request = YoutubeDLRequest(url)
-            if (!hasFlag(args, options, "--no-check-certificates")) {
-                request.addOption("--no-check-certificates")
-            }
-            if (!hasFlag(args, options, "--socket-timeout")) {
-                request.addOption("--socket-timeout", "30")
-            }
-            if (!hasFlag(args, options, "--extractor-args")) {
-                applyExtractorArgs(request, url, extractorArgs)
-            }
+            if (!hasFlag(args, options, "--no-check-certificates")) request.addOption("--no-check-certificates")
+            if (!hasFlag(args, options, "--no-cache-dir")) request.addOption("--no-cache-dir")
+            if (!hasFlag(args, options, "--force-ipv4")) request.addOption("--force-ipv4")
+            if (!hasFlag(args, options, "--concurrent-fragments")) request.addOption("--concurrent-fragments", "4")
+            if (!hasFlag(args, options, "--extractor-retries")) request.addOption("--extractor-retries", "1")
+            if (!hasFlag(args, options, "--socket-timeout")) request.addOption("--socket-timeout", "15")
+            if (!hasFlag(args, options, "--extractor-args")) applyExtractorArgs(request, url, extractorArgs)
             var i = 0
             while (i < args.size) {
                 val current = args[i]

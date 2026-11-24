@@ -144,6 +144,7 @@ class VaultStorageActions {
     int durationSec = 0,
     bool forceMediaPipeline = false,
     int preferredVideoHeight = 0,
+    bool skipHtmlResolve = false,
     Map<String, String> headers = const <String, String>{},
     String? cookiesFile,
   }) {
@@ -168,6 +169,7 @@ class VaultStorageActions {
       subtitleFontSize: settings.subtitleFontSize,
       forceMediaPipeline: forceMediaPipeline,
       preferredVideoHeight: preferredVideoHeight,
+      skipHtmlResolve: skipHtmlResolve,
     );
   }
 

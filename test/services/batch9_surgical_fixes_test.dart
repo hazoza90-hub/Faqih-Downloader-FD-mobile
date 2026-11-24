@@ -207,9 +207,9 @@ void main() {
       expect(File(p.join(jobDir, 'ytdlp_stale.part')).existsSync(), isFalse);
       expect(attempts, <String>[
         'DEFAULT|NO_COOKIE',
-        'DEFAULT|/tmp/cookies.txt',
+        'youtube:player_client=ios,mweb|NO_COOKIE',
         '|NO_COOKIE',
-        '|/tmp/cookies.txt',
+        'youtube:player_client=mweb,web|/tmp/cookies.txt',
       ]);
 
       // Non-YouTube tries with cookies first, then without cookies:

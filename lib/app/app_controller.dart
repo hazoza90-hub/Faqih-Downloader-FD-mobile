@@ -282,8 +282,9 @@ class AppController extends ChangeNotifier {
     String url, {
     String? customTitle,
     Map<String, String> headers = const <String, String>{},
+    bool skipHtmlResolve = false,
   }) =>
-      _enqueueBasicRequest(url, customTitle: customTitle, headers: headers);
+      _enqueueBasicRequest(url, customTitle: customTitle, headers: headers, skipHtmlResolve: skipHtmlResolve);
 
   DownloadJobState _enqueueBasicRequest(
     String url, {
@@ -291,6 +292,7 @@ class AppController extends ChangeNotifier {
     int durationSec = 0,
     bool forceMediaPipeline = false,
     int preferredVideoHeight = 0,
+    bool skipHtmlResolve = false,
     Map<String, String> headers = const <String, String>{},
   }) {
     final trimmed = url.trim();
@@ -304,6 +306,7 @@ class AppController extends ChangeNotifier {
       durationSec: durationSec,
       forceMediaPipeline: forceMediaPipeline,
       preferredVideoHeight: preferredVideoHeight,
+      skipHtmlResolve: skipHtmlResolve,
       headers: headers,
       cookiesFile: _effectiveCookiesFile(),
     );
