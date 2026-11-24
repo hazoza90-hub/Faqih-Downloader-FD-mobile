@@ -110,14 +110,39 @@ Map<String, String> mergeHeaderMaps(
 ) =>
     <String, String>{...base, ...over};
 
+Map<String, String> mergeCookiesIntoHeaders(
+  Map<String, String> headers,
+  Object? rawCookies,
+) {
+  if (rawCookies == null) return headers;
+  final hasCookie = headers.entries.any(
+    (e) => e.key.toLowerCase() == 'cookie' && e.value.trim().isNotEmpty,
+  );
+  if (hasCookie) return headers;
+  var cookieStr = '';
+  if (rawCookies is String) {
+    cookieStr = rawCookies.trim();
+  } else if (rawCookies is Map) {
+    cookieStr = rawCookies.entries
+        .where((e) => e.key.toString().trim().isNotEmpty && e.value != null)
+        .map((e) => '${e.key}=${e.value}')
+        .join('; ');
+  }
+  if (cookieStr.isEmpty) return headers;
+  return <String, String>{...headers, 'Cookie': cookieStr};
+}
+
 bool isManifestUrlOrProto(String url, String protocol) {
   final p = protocol.toLowerCase();
   final u = url.toLowerCase();
   return p.contains('hls') ||
       p.contains('m3u8') ||
       p.contains('dash') ||
+      p.contains('f4m') ||
       u.contains('.m3u8') ||
-      u.contains('.mpd');
+      u.contains('.mpd') ||
+      u.contains('/manifest/hls') ||
+      u.contains('/manifest/dash');
 }
 
 String normalizeLanguageCode(String? raw) {

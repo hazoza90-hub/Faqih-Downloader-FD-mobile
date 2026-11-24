@@ -3,8 +3,16 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import '../core/models/download_chunk.dart';
-import 'server_prober.dart';
+import 'http_client_factory.dart';
 import 'token_bucket_rate_limiter.dart';
+
+class _RetryableHttpException implements Exception {
+  const _RetryableHttpException(this.message, this.httpStatus);
+  final String message;
+  final int httpStatus;
+  @override
+  String toString() => message;
+}
 
 class ChunkWorkerException implements Exception {
   const ChunkWorkerException(
@@ -146,6 +154,8 @@ class ChunkWorker {
             final failed = readChunk();
             throw ChunkWorkerException(
               'Chunk #${failed.chunkId} failed after $maxRetries retries: $error',
+              httpStatus:
+                  error is _RetryableHttpException ? error.httpStatus : null,
             );
           }
           final backoffMs = math.min(1500, 150 * (1 << (retries - 1)));
@@ -211,22 +221,19 @@ class ChunkWorker {
 
     registerAborter(abort);
     try {
-      final req = await httpClient.getUrl(Uri.parse(targetUrl)).timeout(requestTimeout);
-      activeReq = req;
-      req.followRedirects = true;
-      req.maxRedirects = 8;
-      req.headers.set(HttpHeaders.userAgentHeader, ServerProber.defaultUserAgent);
-      req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-      headers.forEach(req.headers.set);
-      if (isRanged && !isGoogleVideo) {
-        req.headers.set(HttpHeaders.rangeHeader, 'bytes=$rangeStart-${snapshot.endByte}');
-      }
-      if (isPaused() || isCancelled()) {
-        req.abort();
-        return;
-      }
-
-      final resp = await req.close().timeout(requestTimeout);
+      final redir = await HttpClientFactory.openWithCookieRedirects(
+        client: httpClient,
+        method: 'GET',
+        uri: Uri.parse(targetUrl),
+        headers: headers,
+        rangeHeader: (isRanged && !isGoogleVideo)
+            ? 'bytes=$rangeStart-${snapshot.endByte}'
+            : null,
+        timeout: requestTimeout,
+        onActiveRequest: (r) => activeReq = r,
+        shouldAbort: () => isPaused() || isCancelled(),
+      );
+      final resp = redir.response;
       await _validateResponse(resp, isRanged, isGoogleVideo, rangeStart);
 
       activeSub = resp.listen(
@@ -290,7 +297,7 @@ class ChunkWorker {
       if (status >= 400 && status < 500 && status != 408 && status != 429) {
         throw ChunkWorkerException(msg, httpStatus: status);
       }
-      throw HttpException(msg);
+      throw _RetryableHttpException(msg, status);
     }
     if (isRanged && !isGoogleVideo && rangeStart > 0 && status == HttpStatus.ok) {
       await resp.drain<void>();

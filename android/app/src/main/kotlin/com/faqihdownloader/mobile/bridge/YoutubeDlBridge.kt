@@ -102,6 +102,7 @@ class YoutubeDlBridge(private val appContext: Context) :
         val headers = call.argument<Map<String, String>>("headers").orEmpty()
         val playlistItems = call.argument<String>("playlistItems")
         val timeoutSeconds = call.argument<Number>("timeoutSeconds")?.toInt()
+        val extractorArgs = call.argument<String>("extractorArgs")
 
         runAsync(result) {
             ensureInitialized()
@@ -109,14 +110,12 @@ class YoutubeDlBridge(private val appContext: Context) :
             request.addOption("--dump-single-json")
             request.addOption("--no-warnings")
             request.addOption("--no-check-certificates")
-            val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 15
+            val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 30
             request.addOption("--socket-timeout", effectiveTimeout.toString())
-            if (isYouTubeUrl(url)) {
-                request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
-            }
+            applyExtractorArgs(request, url, extractorArgs)
             if (!playlistItems.isNullOrBlank()) {
                 request.addOption("--playlist-items", playlistItems.trim())
-            } else {
+            } else if (!isYouTubePlaylistUrl(url)) {
                 request.addOption("--no-playlist")
             }
             if (!cookiesFile.isNullOrBlank()) {
@@ -142,6 +141,7 @@ class YoutubeDlBridge(private val appContext: Context) :
         }
         val args = call.argument<List<String>>("args").orEmpty()
         val options = call.argument<Map<String, Any?>>("options").orEmpty()
+        val extractorArgs = call.argument<String>("extractorArgs")
 
         runAsync(result) {
             ensureInitialized()
@@ -150,10 +150,10 @@ class YoutubeDlBridge(private val appContext: Context) :
                 request.addOption("--no-check-certificates")
             }
             if (!hasFlag(args, options, "--socket-timeout")) {
-                request.addOption("--socket-timeout", "15")
+                request.addOption("--socket-timeout", "30")
             }
-            if (isYouTubeUrl(url) && !hasFlag(args, options, "--extractor-args")) {
-                request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
+            if (!hasFlag(args, options, "--extractor-args")) {
+                applyExtractorArgs(request, url, extractorArgs)
             }
             var i = 0
             while (i < args.size) {
@@ -173,13 +173,8 @@ class YoutubeDlBridge(private val appContext: Context) :
             for ((key, value) in options) {
                 if (key.isBlank()) continue
                 when (value) {
-                    is List<*> -> {
-                        for (item in value) {
-                            val str = item?.toString()
-                            if (!str.isNullOrBlank()) {
-                                request.addOption(key, str)
-                            }
-                        }
+                    is List<*> -> value.forEach { item ->
+                        item?.toString()?.takeIf { it.isNotBlank() }?.let { request.addOption(key, it) }
                     }
                     null -> request.addOption(key)
                     is Boolean -> if (value) request.addOption(key)
@@ -187,21 +182,12 @@ class YoutubeDlBridge(private val appContext: Context) :
                 }
             }
             val response = YoutubeDL.getInstance().execute(request, processId) { progress, eta, line ->
-                emitEvent(
-                    mapOf(
-                        "type" to "progress",
-                        "processId" to processId,
-                        "progress" to progress.toDouble(),
-                        "etaSeconds" to eta,
-                        "line" to line,
-                    ),
-                )
+                emitEvent(mapOf(
+                    "type" to "progress", "processId" to processId,
+                    "progress" to progress.toDouble(), "etaSeconds" to eta, "line" to line,
+                ))
             }
-            mapOf(
-                "exitCode" to response.exitCode,
-                "stdout" to response.out,
-                "stderr" to response.err,
-            )
+            mapOf("exitCode" to response.exitCode, "stdout" to response.out, "stderr" to response.err)
         }
     }
 
@@ -215,13 +201,7 @@ class YoutubeDlBridge(private val appContext: Context) :
         runAsync(result) {
             ensureInitialized()
             val res = ffmpegRunner.run(args, processId) { line ->
-                emitEvent(
-                    mapOf(
-                        "type" to "ffmpeg_log",
-                        "processId" to processId,
-                        "line" to line,
-                    ),
-                )
+                emitEvent(mapOf("type" to "ffmpeg_log", "processId" to processId, "line" to line))
             }
             mapOf("exitCode" to res.exitCode, "output" to res.output)
         }
@@ -234,23 +214,31 @@ class YoutubeDlBridge(private val appContext: Context) :
             return
         }
         runAsync(result) {
-            val ytdlCancelled = runCatching {
-                YoutubeDL.getInstance().destroyProcessById(processId)
-            }.getOrDefault(false)
-            val ffmpegCancelled = ffmpegRunner.cancel(processId)
-            ytdlCancelled || ffmpegCancelled
+            val ytdlCancelled = runCatching { YoutubeDL.getInstance().destroyProcessById(processId) }.getOrDefault(false)
+            ytdlCancelled || ffmpegRunner.cancel(processId)
         }
     }
 
-    private fun isYouTubeUrl(url: String): Boolean {
+    private fun isYouTubeUrl(url: String): Boolean =
+        url.lowercase().let { it.contains("youtube.com/") || it.contains("youtu.be/") }
+
+    private fun isYouTubePlaylistUrl(url: String): Boolean {
+        if (!isYouTubeUrl(url)) return false
         val lower = url.lowercase()
-        return lower.contains("youtube.com/") || lower.contains("youtu.be/")
+        return lower.contains("/playlist?") ||
+            (lower.contains("list=") && !lower.contains("v=") && !lower.contains("youtu.be/"))
     }
 
-    private fun hasFlag(args: List<String>, options: Map<String, Any?>, flag: String): Boolean {
-        if (options.containsKey(flag)) return true
-        return args.any { it == flag || it.startsWith("$flag=") }
+    private fun applyExtractorArgs(request: YoutubeDLRequest, url: String, extractorArgs: String?) {
+        if (extractorArgs != null) {
+            if (extractorArgs.isNotBlank()) request.addOption("--extractor-args", extractorArgs)
+        } else if (isYouTubeUrl(url)) {
+            request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
+        }
     }
+
+    private fun hasFlag(args: List<String>, options: Map<String, Any?>, flag: String): Boolean =
+        options.containsKey(flag) || args.any { it == flag || it.startsWith("$flag=") }
 
     private fun ensureInitialized() {
         if (initialized.get()) return

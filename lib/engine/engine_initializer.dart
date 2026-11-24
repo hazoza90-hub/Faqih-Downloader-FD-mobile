@@ -16,6 +16,7 @@ class EngineInitResult {
     required this.initialElapsedSec,
     required this.chunks,
     required this.restoredFromCheckpoint,
+    this.cookieHeader = '',
   });
 
   final String resolvedUrl;
@@ -25,6 +26,7 @@ class EngineInitResult {
   final double initialElapsedSec;
   final List<DownloadChunk> chunks;
   final bool restoredFromCheckpoint;
+  final String cookieHeader;
 }
 
 /// Restores saved chunk checkpoints or probes the server to partition initial chunks.
@@ -91,6 +93,7 @@ class EngineInitializer {
       initialElapsedSec: 0.0,
       chunks: chunks,
       restoredFromCheckpoint: false,
+      cookieHeader: probe.cookieHeader,
     );
   }
 }

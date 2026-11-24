@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../core/models/youtube_stream_info.dart';
+import '../../engine/http_client_factory.dart';
 import 'format_ranker.dart';
 import 'tiktok_state_parser.dart';
 
@@ -12,14 +13,13 @@ class TikTokFallbackExtractor {
     HttpClient Function()? httpClientFactory,
     FormatRanker ranker = const FormatRanker(),
     String tikwmBaseUrl = 'https://www.tikwm.com',
-    this.timeout = const Duration(seconds: 15),
-  })  : _clientFactory = httpClientFactory ?? HttpClient.new,
+    this.timeout = const Duration(seconds: 20),
+  })  : _clientFactory = httpClientFactory ??
+            (() => HttpClientFactory.create(connectionTimeout: timeout)),
         _ranker = ranker,
         _tikwmBaseUrl = tikwmBaseUrl.replaceFirst(RegExp(r'/+$'), '');
 
-  static const String _chromeUa =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+  static const String _chromeUa = HttpClientFactory.defaultUserAgent;
   static const int _maxHtmlBytes = 4 * 1024 * 1024;
 
   final HttpClient Function() _clientFactory;

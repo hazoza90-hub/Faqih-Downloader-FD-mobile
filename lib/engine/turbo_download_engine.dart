@@ -11,6 +11,7 @@ import 'dynamic_splitter.dart';
 import 'engine_callbacks.dart';
 import 'engine_initializer.dart';
 import 'file_assembler.dart';
+import 'http_client_factory.dart';
 import 'server_prober.dart';
 import 'speed_tracker.dart';
 import 'token_bucket_rate_limiter.dart';
@@ -61,6 +62,7 @@ class TurboDownloadEngine {
   String _filename = '';
   int _totalSize = 0;
   bool _supportsRanges = false;
+  late Map<String, String> _effectiveHeaders = headers;
   double _initialElapsedSec = 0.0;
   bool _isPaused = false;
   bool _isCancelled = false;
@@ -140,10 +142,11 @@ class TurboDownloadEngine {
 
     final ownsClient = _injectedClient == null;
     final client = _injectedClient ??
-        (HttpClient()
-          ..connectionTimeout = const Duration(seconds: 15)
-          ..idleTimeout = const Duration(seconds: 15)
-          ..maxConnectionsPerHost = math.max(maxConnections + 2, 8));
+        HttpClientFactory.create(
+          connectionTimeout: const Duration(seconds: 20),
+          idleTimeout: const Duration(seconds: 20),
+          maxConnectionsPerHost: math.max(maxConnections + 2, 8),
+        );
 
     Timer? progressTimer;
     try {
@@ -163,7 +166,19 @@ class TurboDownloadEngine {
         if (++tickCount % 10 == 0) unawaited(_saveCurrentState());
       });
 
-      await _runWorkerLoop(client);
+      var triedSingleStream = false;
+      while (true) {
+        await _runWorkerLoop(client);
+        if (_isCancelled || _isPaused || _fatalError == null) break;
+        if (!triedSingleStream &&
+            _supportsRanges &&
+            _shouldFallbackToSingleStream()) {
+          triedSingleStream = true;
+          await _resetToSingleStream();
+          continue;
+        }
+        break;
+      }
       progressTimer.cancel();
       progressTimer = null;
 
@@ -217,6 +232,10 @@ class TurboDownloadEngine {
       _totalSize = init.totalSize;
       _supportsRanges = init.supportsRanges;
       _initialElapsedSec = init.initialElapsedSec;
+      _effectiveHeaders = HttpClientFactory.withCookieHeader(
+        headers,
+        init.cookieHeader,
+      );
       _chunks..clear()..addAll(init.chunks);
       if (!init.restoredFromCheckpoint) await _saveCurrentState();
     } on ProbeException catch (e) {
@@ -275,7 +294,7 @@ class TurboDownloadEngine {
       await _worker.run(
         httpClient: client,
         url: _resolvedUrl,
-        headers: headers,
+        headers: _effectiveHeaders,
         supportsRanges: _supportsRanges,
         readChunk: () => _chunks.firstWhere((c) => c.chunkId == chunkId),
         updateChunk: (updater) {
@@ -324,7 +343,7 @@ class TurboDownloadEngine {
       totalSize: _totalSize,
       supportsRanges: _supportsRanges,
       filename: _filename,
-      headers: headers,
+      headers: _effectiveHeaders,
       accumulatedActiveSeconds: _speedTracker.elapsedActiveSeconds,
       chunks: List<DownloadChunk>.unmodifiable(_chunks),
     );
@@ -333,6 +352,34 @@ class TurboDownloadEngine {
       await _persistence.saveState(state);
     }).catchError((_) {});
     return _saveQueue;
+  }
+
+  bool _shouldFallbackToSingleStream() {
+    final msg = _fatalError.toString().toLowerCase();
+    return _chunks.length > 1 ||
+        msg.contains('ignored range') ||
+        const <int>{403, 429, 503}.contains(_fatalHttpStatus) ||
+        msg.contains('http 429') ||
+        msg.contains('http 503') ||
+        msg.contains('http 403') ||
+        msg.contains('failed after');
+  }
+
+  Future<void> _resetToSingleStream() async {
+    callbacks?.onLog?.call('[FALLBACK] Retrying as single-stream without Range');
+    _fatalError = null;
+    _fatalLinkExpired = false;
+    _fatalHttpStatus = null;
+    _supportsRanges = false;
+    await _saveQueue;
+    await _persistence.cleanupTempDir(destinationPath);
+    _chunks
+      ..clear()
+      ..add(DownloadChunk(
+        chunkId: 0, startByte: 0, endByte: -1,
+        partFilepath: ChunkPersistence.partFilePathFor(destinationPath, 0),
+      ));
+    await _saveCurrentState();
   }
 
   void _abortAllWorkers() {

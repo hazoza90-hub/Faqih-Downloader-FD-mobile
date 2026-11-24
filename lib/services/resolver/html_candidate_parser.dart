@@ -11,10 +11,11 @@ abstract final class HtmlCandidateParser {
     '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp',
   };
   static const Set<String> _strongBinaryExts = <String>{
-    '.apk', '.xapk', '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz',
-    '.exe', '.msi', '.iso', '.dmg', '.pkg', '.deb', '.rpm', '.pdf', '.epub',
-    '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.mp4', '.mkv', '.mp3',
-    '.m4a', '.webm', '.avi', '.mov', '.flac', '.wav', '.bin',
+    '.apk', '.xapk', '.apks', '.apkm', '.obb', '.ipa', '.torrent', '.zip', '.rar',
+    '.7z', '.tar', '.gz', '.bz2', '.xz', '.tgz', '.exe', '.msi', '.iso', '.dmg',
+    '.pkg', '.deb', '.rpm', '.pdf', '.epub', '.doc', '.docx', '.xls', '.xlsx',
+    '.ppt', '.pptx', '.mp4', '.mkv', '.mp3', '.m4a', '.webm', '.avi', '.mov',
+    '.flac', '.wav', '.bin',
   };
 
   static bool isPrivateOrLoopbackHost(String hostname) {
@@ -111,7 +112,13 @@ abstract final class HtmlCandidateParser {
       if (_strongBinaryExts.contains(ext) ||
           full.toLowerCase().contains('.tar.gz')) {
         total += 120;
-        if (ext == '.apk' || ext == '.xapk' || ext == '.zip' || ext == '.exe') {
+        if (ext == '.apk' ||
+            ext == '.xapk' ||
+            ext == '.apks' ||
+            ext == '.apkm' ||
+            ext == '.obb' ||
+            ext == '.zip' ||
+            ext == '.exe') {
           total += 30;
         }
       }
@@ -151,6 +158,15 @@ abstract final class HtmlCandidateParser {
     }
     for (final m in _jsRedirectRe.allMatches(html)) {
       consider(m.group(1) ?? m.group(2), 80);
+    }
+    for (final m in _formActionRe.allMatches(html)) {
+      consider(m.group(1) ?? m.group(2), 55);
+    }
+    for (final m in _iframeSrcRe.allMatches(html)) {
+      consider(m.group(1) ?? m.group(2), 50);
+    }
+    for (final m in _jsonDownloadUrlRe.allMatches(html)) {
+      consider(m.group(1), 75);
     }
     for (final m in _scriptUrlRe.allMatches(html)) {
       consider(m.group(1), 20);
@@ -222,8 +238,20 @@ abstract final class HtmlCandidateParser {
     r'''(?:location(?:\.href)?\s*=\s*["']([^"']+)["']|(?:location\.(?:assign|replace)|window\.open)\(\s*["']([^"']+)["'])''',
     caseSensitive: false,
   );
+  static final RegExp _formActionRe = RegExp(
+    r'''<form\b[^>]*\baction\s*=\s*(?:"([^"]*)"|'([^']*)')''',
+    caseSensitive: false,
+  );
+  static final RegExp _iframeSrcRe = RegExp(
+    r'''<iframe\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')''',
+    caseSensitive: false,
+  );
+  static final RegExp _jsonDownloadUrlRe = RegExp(
+    r'''"(?:download_url|downloadUrl|file_url)"\s*:\s*"([^"]+)"''',
+    caseSensitive: false,
+  );
   static final RegExp _scriptUrlRe = RegExp(
-    r'''["'](https?:(?:\\/|/)[^\s"'<>]+\.(?:apk|xapk|zip|rar|7z|exe|msi|pdf|mp4|mkv|mp3)(?:\?[^"'\s<>]*)?)["']''',
+    r'''["'](https?:(?:\\/|/)[^\s"'<>]+\.(?:apk|xapk|apks|apkm|obb|ipa|torrent|zip|rar|7z|exe|msi|pdf|mp4|mkv|mp3)(?:\?[^"'\s<>]*)?)["']''',
     caseSensitive: false,
   );
   static final RegExp _cdStarRe = RegExp(

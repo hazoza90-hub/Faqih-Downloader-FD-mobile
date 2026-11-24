@@ -43,6 +43,7 @@ class YoutubeDlChannel {
     Map<String, String>? headers,
     String? playlistItems,
     int? timeoutSeconds,
+    String? extractorArgs,
   }) async {
     try {
       final result = await _methodChannel.invokeMethod<String>(
@@ -55,6 +56,7 @@ class YoutubeDlChannel {
           if (headers != null && headers.isNotEmpty) 'headers': headers,
           'playlistItems': ?playlistItems,
           'timeoutSeconds': ?timeoutSeconds,
+          'extractorArgs': ?extractorArgs,
         },
       );
       return result ?? '';
@@ -70,6 +72,7 @@ class YoutubeDlChannel {
     required String processId,
     List<String> args = const <String>[],
     Map<String, Object?> options = const <String, Object?>{},
+    String? extractorArgs,
   }) async {
     final map = await _invokeMap(
       'downloadMedia',
@@ -78,6 +81,7 @@ class YoutubeDlChannel {
         'processId': processId,
         'args': args,
         'options': options,
+        'extractorArgs': ?extractorArgs,
       },
     );
     return NativeCommandResult.fromMap(map);

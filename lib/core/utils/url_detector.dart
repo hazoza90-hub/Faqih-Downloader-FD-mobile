@@ -5,21 +5,26 @@ final RegExp _youtubeRegex = RegExp(
   caseSensitive: false,
 );
 
+final RegExp _youtubePlaylistRegex = RegExp(
+  r'^(?:https?://)?(?:www\.|m\.|music\.)?youtube\.com/playlist\?(?:.*&)?list=[a-zA-Z0-9_-]+',
+  caseSensitive: false,
+);
+
 final Map<String, RegExp> _socialMediaPatterns = <String, RegExp>{
   'tiktok': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?tiktok\.com/(?:@[^/?#]+/(?:video|photo)/\d+|t/[a-zA-Z0-9_-]+|v/\d+)|^(?:https?://)?(?:vt|vm)\.tiktok\.com/[a-zA-Z0-9_-]+',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?tiktok\.com/(?:@[^/?#]+/(?:video|photo)/\d+|share/video/\d+|t/[a-zA-Z0-9_-]+|v/\d+)|^(?:https?://)?(?:vt|vm)\.tiktok\.com/[a-zA-Z0-9_-]+',
     caseSensitive: false,
   ),
   'instagram': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|stories|tv)/[a-zA-Z0-9_.-]+',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:instagram\.com|instagr\.am)/(?:p|reel|reels|stories|tv|share)/(?:[a-zA-Z0-9_.-]+/)?[a-zA-Z0-9_.-]+',
     caseSensitive: false,
   ),
   'facebook': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?fb\.watch/[a-zA-Z0-9_.-]+/?|^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?facebook\.com/(?:watch/?(?:\?|$)|reel/\d+|reels/\d+|share/[vr]/[a-zA-Z0-9_-]+|[^/?#]+/videos/\d+|video\.php\?(?:.*&)?v=\d+)',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:fb\.watch|fb\.me)/[a-zA-Z0-9_.-]+/?|^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?facebook\.com/(?:watch/?(?:\?|$)|reel/\d+|reels/\d+|share/[vr]/[a-zA-Z0-9_-]+|[^/?#]+/videos/\d+|(?:video|story)\.php\?(?:.*&)?(?:v|story_fbid)=\d+)',
     caseSensitive: false,
   ),
   'twitter': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:twitter\.com|x\.com)/[^/?#]+/status/\d+',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:twitter\.com|x\.com)/(?:i(?:/web)?/status|[^/?#]+/status)/\d+',
     caseSensitive: false,
   ),
   'reddit': RegExp(
@@ -96,7 +101,7 @@ bool isYouTubeUrl(String url) {
   if (trimmed.isEmpty) {
     return false;
   }
-  return _youtubeRegex.hasMatch(trimmed);
+  return _youtubeRegex.hasMatch(trimmed) || _youtubePlaylistRegex.hasMatch(trimmed);
 }
 
 bool isSocialMediaUrl(String url) {

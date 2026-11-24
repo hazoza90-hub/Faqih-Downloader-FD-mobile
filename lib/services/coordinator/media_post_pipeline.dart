@@ -80,25 +80,53 @@ class MediaPostPipeline {
       );
     }
 
-    final videoExt = _normalizedVideoExt(currentPath, request.selectedVideoFormat?.ext);
+    var videoExt = _normalizedVideoExt(
+      currentPath,
+      request.selectedVideoFormat?.ext,
+      vcodec: request.selectedVideoFormat?.vcodec ?? '',
+    );
     var wasMuxedToMp4 = false;
     if (rawAudioPath != null && rawAudioPath.isNotEmpty) {
-      final muxOut = p.join(jobDir, 'stage_mux.$videoExt');
-      final pid = '${request.id}_mux';
-      onTrackProcess(pid);
-      currentPath = await ffmpeg.muxVideoAndAudio(
-        videoPath: currentPath,
-        audioPath: rawAudioPath,
-        outputPath: muxOut,
-        audioCodec: request.selectedAudioTrack?.codec ??
-            request.selectedVideoFormat?.selectedAudioTrack?.codec ??
-            request.selectedVideoFormat?.acodec,
-        processId: pid,
-        durationSec: durSec,
-        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
-      );
-      wasMuxedToMp4 = videoExt == 'mp4';
-      onTrackProcess(null);
+      final audioCodec = request.selectedAudioTrack?.codec ??
+          request.selectedVideoFormat?.selectedAudioTrack?.codec ??
+          request.selectedVideoFormat?.acodec;
+      try {
+        final muxOut = p.join(jobDir, 'stage_mux.$videoExt');
+        final pid = '${request.id}_mux';
+        onTrackProcess(pid);
+        currentPath = await ffmpeg.muxVideoAndAudio(
+          videoPath: currentPath,
+          audioPath: rawAudioPath,
+          outputPath: muxOut,
+          audioCodec: audioCodec,
+          processId: pid,
+          durationSec: durSec,
+          onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        );
+        wasMuxedToMp4 = videoExt == 'mp4';
+      } on MediaProcessingException catch (e) {
+        if (e.kind == MediaErrorKind.cancelled ||
+            isCancelled() ||
+            videoExt == 'mkv') {
+          rethrow;
+        }
+        videoExt = 'mkv';
+        final mkvOut = p.join(jobDir, 'stage_mux.mkv');
+        final mkvPid = '${request.id}_mux_mkv';
+        onTrackProcess(mkvPid);
+        currentPath = await ffmpeg.muxVideoAndAudio(
+          videoPath: currentPath,
+          audioPath: rawAudioPath,
+          outputPath: mkvOut,
+          audioCodec: audioCodec,
+          processId: mkvPid,
+          durationSec: durSec,
+          onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        );
+        wasMuxedToMp4 = false;
+      } finally {
+        onTrackProcess(null);
+      }
       _checkCancelled(isCancelled);
     }
 
@@ -233,11 +261,24 @@ class MediaPostPipeline {
     return MediaPipelineResult(filePath: currentPath, ext: targetExt);
   }
 
-  static String _normalizedVideoExt(String path, String? preferredExt) {
-    final cand = (preferredExt ?? p.extension(path).replaceFirst('.', ''))
-        .trim()
-        .toLowerCase();
-    return cand == 'mkv' ? 'mkv' : 'mp4';
+  static String _normalizedVideoExt(
+    String path,
+    String? preferredExt, {
+    String vcodec = '',
+  }) {
+    final rawExt = p.extension(path).replaceFirst('.', '').trim().toLowerCase();
+    final pref = (preferredExt ?? '').trim().toLowerCase();
+    final vc = vcodec.toLowerCase();
+    if (rawExt == 'mkv' || pref == 'mkv') return 'mkv';
+    if (rawExt == 'webm' ||
+        pref == 'webm' ||
+        vc.contains('vp9') ||
+        vc.contains('vp8') ||
+        vc.contains('av01') ||
+        vc.contains('theora')) {
+      return 'mkv';
+    }
+    return 'mp4';
   }
 
   static void _checkCancelled(bool Function() isCancelled) {

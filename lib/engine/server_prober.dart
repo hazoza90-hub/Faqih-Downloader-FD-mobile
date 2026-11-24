@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/utils/filename_sanitizer.dart';
+import 'http_client_factory.dart';
 
 class ProbeException implements Exception {
   const ProbeException(
@@ -32,6 +33,7 @@ class ProbeResult {
     required this.finalUrl,
     required this.httpStatus,
     this.linkExpired = false,
+    this.cookieHeader = '',
   });
 
   final int totalSize;
@@ -41,18 +43,17 @@ class ProbeResult {
   final String finalUrl;
   final int httpStatus;
   final bool linkExpired;
+  final String cookieHeader;
 }
 
 /// Probes HTTP server capabilities (size, range support, filename, expiry).
 class ServerProber {
   ServerProber({
     HttpClient? httpClient,
-    this.timeout = const Duration(seconds: 12),
+    this.timeout = const Duration(seconds: 20),
   }) : _injectedClient = httpClient;
 
-  static const String defaultUserAgent =
-      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+  static const String defaultUserAgent = HttpClientFactory.defaultUserAgent;
 
   final HttpClient? _injectedClient;
   final Duration timeout;
@@ -82,9 +83,10 @@ class ServerProber {
 
     final ownsClient = _injectedClient == null;
     final client = _injectedClient ??
-        (HttpClient()
-          ..connectionTimeout = timeout
-          ..idleTimeout = const Duration(seconds: 15));
+        HttpClientFactory.create(
+          connectionTimeout: timeout,
+          idleTimeout: timeout,
+        );
     try {
       return await _probeWithClient(
         client,
@@ -108,10 +110,13 @@ class ServerProber {
 
     if (result == null || !result.supportsRanges) {
       final probeUri = Uri.parse(result?.finalUrl ?? uri.toString());
+      final probeHeaders = result != null && result.cookieHeader.isNotEmpty
+          ? HttpClientFactory.withCookieHeader(headers, result.cookieHeader)
+          : headers;
       final rangeRes = await _probeGet(
         client,
         probeUri,
-        <String, String>{...headers, HttpHeaders.rangeHeader: 'bytes=0-0'},
+        probeHeaders,
         allowError: true,
         requestedRange: true,
       );
@@ -123,7 +128,7 @@ class ServerProber {
         final plainRes = await _probeGet(
           client,
           probeUri,
-          headers,
+          probeHeaders,
           allowError: false,
           requestedRange: false,
         );
@@ -147,6 +152,7 @@ class ServerProber {
       contentType: resolved.contentType,
       finalUrl: resolved.finalUrl,
       httpStatus: resolved.httpStatus,
+      cookieHeader: resolved.cookieHeader,
     );
   }
 
@@ -156,7 +162,14 @@ class ServerProber {
     Map<String, String> headers,
   ) async {
     try {
-      final resp = await _send(client, 'HEAD', uri, headers);
+      final redir = await HttpClientFactory.openWithCookieRedirects(
+        client: client,
+        method: 'HEAD',
+        uri: uri,
+        headers: headers,
+        timeout: timeout,
+      );
+      final resp = redir.response;
       await resp.drain<void>();
       if (resp.statusCode < 200 || resp.statusCode >= 300) return null;
       final totalSize = _parseContentLength(resp.headers);
@@ -166,8 +179,9 @@ class ServerProber {
         supportsRanges: ar == 'bytes' && totalSize > 0,
         filename: _parseContentDisposition(resp.headers.value('content-disposition')),
         contentType: _parseContentType(resp.headers),
-        finalUrl: _resolveFinalUrl(uri, resp.redirects),
+        finalUrl: redir.finalUri.toString(),
         httpStatus: resp.statusCode,
+        cookieHeader: redir.cookieHeader,
       );
     } catch (_) {
       return null;
@@ -182,8 +196,16 @@ class ServerProber {
     required bool requestedRange,
   }) async {
     try {
-      final resp = await _send(client, 'GET', uri, headers);
-      final finalUrl = _resolveFinalUrl(uri, resp.redirects);
+      final redir = await HttpClientFactory.openWithCookieRedirects(
+        client: client,
+        method: 'GET',
+        uri: uri,
+        headers: headers,
+        rangeHeader: requestedRange ? 'bytes=0-0' : null,
+        timeout: timeout,
+      );
+      final resp = redir.response;
+      final finalUrl = redir.finalUri.toString();
       final status = resp.statusCode;
       final sub = resp.listen((_) {});
       await sub.cancel();
@@ -197,6 +219,7 @@ class ServerProber {
           finalUrl: finalUrl,
           httpStatus: status,
           linkExpired: true,
+          cookieHeader: redir.cookieHeader,
         );
       }
       if (!allowError && (status < 200 || status >= 400)) {
@@ -232,6 +255,7 @@ class ServerProber {
         contentType: _parseContentType(resp.headers),
         finalUrl: finalUrl,
         httpStatus: status,
+        cookieHeader: redir.cookieHeader,
       );
     } on ProbeException {
       rethrow;
@@ -250,26 +274,9 @@ class ServerProber {
       contentType: next.contentType.isNotEmpty ? next.contentType : base.contentType,
       finalUrl: next.finalUrl,
       httpStatus: next.httpStatus,
+      cookieHeader: next.cookieHeader.isNotEmpty ? next.cookieHeader : base.cookieHeader,
     );
   }
-
-  Future<HttpClientResponse> _send(
-    HttpClient client,
-    String method,
-    Uri uri,
-    Map<String, String> headers,
-  ) async {
-    final req = await client.openUrl(method, uri).timeout(timeout);
-    req.followRedirects = true;
-    req.maxRedirects = 8;
-    req.headers.set(HttpHeaders.userAgentHeader, defaultUserAgent);
-    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    headers.forEach(req.headers.set);
-    return req.close().timeout(timeout);
-  }
-
-  static String _resolveFinalUrl(Uri initial, List<RedirectInfo> redirects) =>
-      redirects.fold<Uri>(initial, (cur, r) => cur.resolveUri(r.location)).toString();
 
   static String _parseContentType(HttpHeaders headers) =>
       (headers.value(HttpHeaders.contentTypeHeader) ?? '').split(';').first.trim().toLowerCase();

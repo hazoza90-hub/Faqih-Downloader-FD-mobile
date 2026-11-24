@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import '../../engine/http_client_factory.dart';
 import 'html_candidate_parser.dart';
 
 @immutable
@@ -33,13 +34,12 @@ class ResolvedDownloadResult {
 class HtmlDownloadResolver {
   HtmlDownloadResolver({
     HttpClient Function()? httpClientFactory,
-    this.timeout = const Duration(seconds: 12),
-  }) : _clientFactory = httpClientFactory ?? HttpClient.new;
+    this.timeout = const Duration(seconds: 20),
+  }) : _clientFactory = httpClientFactory ??
+            (() => HttpClientFactory.create(connectionTimeout: timeout));
 
-  static const String browserUserAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-  static const int _maxHtmlBytes = 512 * 1024;
+  static const String browserUserAgent = HttpClientFactory.defaultUserAgent;
+  static const int _maxHtmlBytes = 1024 * 1024;
   static const int _maxRedirects = 8;
 
   final HttpClient Function() _clientFactory;
@@ -88,10 +88,10 @@ class HtmlDownloadResolver {
 
       final cookieStr = fetched.cookieHeader;
       if (!_isHtmlMime(fetched.contentType)) {
-        final mergedHeaders = <String, String>{
+        final mergedHeaders = _withDefaultUa(<String, String>{
           ...headers,
           if (cookieStr.isNotEmpty) HttpHeaders.cookieHeader: cookieStr,
-        };
+        });
         return ResolvedDownloadResult(
           url: fetched.finalUri.toString(),
           filename: fetched.filename ??
@@ -110,11 +110,11 @@ class HtmlDownloadResolver {
         fetched.finalUri,
         srcIsPublic: srcIsPublic,
       );
-      final candidateHeaders = <String, String>{
+      final candidateHeaders = _withDefaultUa(<String, String>{
         ...headers,
         'Referer': fetched.finalUri.toString(),
         if (cookieStr.isNotEmpty) HttpHeaders.cookieHeader: cookieStr,
-      };
+      });
       if (!probeCandidates) {
         if (candidates.isNotEmpty) {
           final top = Uri.parse(candidates.first);
@@ -132,7 +132,7 @@ class HtmlDownloadResolver {
         );
       }
 
-      for (final candidateUrl in candidates.take(3)) {
+      for (final candidateUrl in candidates.take(8)) {
         final candUri = Uri.tryParse(candidateUrl);
         if (candUri == null) continue;
         final probed = await _probeCandidate(
@@ -160,14 +160,19 @@ class HtmlDownloadResolver {
     required Map<String, String> headers,
     required bool srcIsPublic,
   }) async {
-    for (final method in const <String>['HEAD', 'GET']) {
+    const attempts = <({String method, bool withRange})>[
+      (method: 'HEAD', withRange: false),
+      (method: 'GET', withRange: true),
+      (method: 'GET', withRange: false),
+    ];
+    for (final attempt in attempts) {
       try {
-        final reqHeaders = method == 'GET'
+        final reqHeaders = attempt.withRange
             ? <String, String>{...headers, HttpHeaders.rangeHeader: 'bytes=0-0'}
             : headers;
         final res = await _openWithRedirects(
           client: client,
-          method: method,
+          method: attempt.method,
           startUri: uri,
           headers: reqHeaders,
           srcIsPublic: srcIsPublic,
@@ -176,11 +181,11 @@ class HtmlDownloadResolver {
         if (res.statusCode >= 200 &&
             res.statusCode < 300 &&
             !_isHtmlMime(res.contentType)) {
-          final mergedHeaders = <String, String>{
+          final mergedHeaders = _withDefaultUa(<String, String>{
             ...headers,
             if (res.cookieHeader.isNotEmpty)
               HttpHeaders.cookieHeader: res.cookieHeader,
-          };
+          });
           return ResolvedDownloadResult(
             url: res.finalUri.toString(),
             filename: res.filename ??
@@ -198,6 +203,18 @@ class HtmlDownloadResolver {
       } catch (_) {}
     }
     return null;
+  }
+
+  static Map<String, String> _withDefaultUa(Map<String, String> headers) {
+    final hasUa = headers.entries.any(
+      (e) => e.key.toLowerCase() == HttpHeaders.userAgentHeader &&
+          e.value.trim().isNotEmpty,
+    );
+    if (hasUa) return headers;
+    return <String, String>{
+      'User-Agent': browserUserAgent,
+      ...headers,
+    };
   }
 
   Future<_HttpFetchInfo> _openWithRedirects({

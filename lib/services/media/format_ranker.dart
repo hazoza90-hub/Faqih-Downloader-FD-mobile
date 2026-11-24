@@ -21,14 +21,40 @@ class FormatRanker {
 
   YouTubeStreamInfo parse(Map<String, dynamic> raw, {String fallbackUrl = ''}) {
     final rawEntries = raw['entries'];
-    final isPlaylist = raw['_type']?.toString() == 'playlist' ||
-        (rawEntries is List && rawEntries.isNotEmpty);
+    final entryMaps = rawEntries is List
+        ? rawEntries
+            .whereType<Map>()
+            .map(Map<String, dynamic>.from)
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+    final rawType = raw['_type']?.toString().toLowerCase() ?? '';
 
+    if (entryMaps.length == 1) {
+      final single = Map<String, dynamic>.from(entryMaps.first);
+      for (final key in const <String>[
+        'http_headers',
+        'cookies',
+        'webpage_url',
+        'original_url',
+        'extractor_key',
+        'title',
+        'thumbnail',
+      ]) {
+        if (single[key] == null && raw[key] != null) {
+          single[key] = raw[key];
+        }
+      }
+      final hasVideoPayload = single.containsKey('formats') ||
+          (single['url']?.toString().trim().isNotEmpty ?? false);
+      if (rawType != 'playlist' || hasVideoPayload) {
+        return parse(single, fallbackUrl: fallbackUrl);
+      }
+    }
+
+    final isPlaylist = rawType == 'playlist' || entryMaps.length > 1;
     if (isPlaylist) {
       final entries = <YouTubeStreamInfo>[
-        if (rawEntries is List)
-          for (final item in rawEntries.whereType<Map>())
-            parse(Map<String, dynamic>.from(item), fallbackUrl: fallbackUrl),
+        for (final item in entryMaps) parse(item, fallbackUrl: fallbackUrl),
       ];
       final title = readMediaTitle(raw, fallback: 'Playlist');
       final pageUrl = readMediaWebpageUrl(raw, fallbackUrl);
@@ -46,7 +72,10 @@ class FormatRanker {
       );
     }
 
-    final formats = readFormatMaps(raw['formats']);
+    var formats = readFormatMaps(raw['formats']);
+    if (formats.isEmpty && (raw['url']?.toString().trim().isNotEmpty ?? false)) {
+      formats = <Map<String, dynamic>>[raw];
+    }
     final audioTracks = rankAudioTracks(formats, root: raw);
     final defaultAudio = pickDefaultAudio(audioTracks);
     final videoFormats = rankVideoFormats(
@@ -57,7 +86,10 @@ class FormatRanker {
     final subtitleTracks = rankSubtitleTracks(raw);
 
     final bestVideo = videoFormats.isNotEmpty ? videoFormats.first : null;
-    final rootHeaders = toHeaderMap(raw['http_headers']);
+    final rootHeaders = mergeCookiesIntoHeaders(
+      toHeaderMap(raw['http_headers']),
+      raw['cookies'],
+    );
     final pageUrl = readMediaWebpageUrl(raw, fallbackUrl);
     final title = readMediaTitle(raw, fallback: 'video');
     final ext = bestVideo?.ext ?? defaultAudio?.ext ?? raw['ext']?.toString() ?? 'mp4';
@@ -108,8 +140,14 @@ class FormatRanker {
     AudioTrack? defaultAudio,
   }) {
     final byBucket = <String, ScoredCandidate<VideoFormatOption>>{};
-    final fallbackHeaders = toHeaderMap(root['http_headers']);
+    final fallbackHeaders = mergeCookiesIntoHeaders(
+      toHeaderMap(root['http_headers']),
+      root['cookies'],
+    );
     final duration = parseDoubleValue(root['duration']);
+    const audioOnlyExts = <String>{
+      'm4a', 'mp3', 'opus', 'ogg', 'aac', 'wav', 'flac', 'weba',
+    };
 
     for (final fmt in formats) {
       final url = fmt['url']?.toString().trim() ?? '';
@@ -121,14 +159,20 @@ class FormatRanker {
       final vcodec = (fmt['vcodec']?.toString() ?? '').trim();
       final acodec = (fmt['acodec']?.toString() ?? '').trim();
       final height = resolveFormatHeight(fmt);
-      final isVideo = (vcodec.isNotEmpty && vcodec != 'none') || height > 0;
-      if (!isVideo) continue;
+      final vcLower = vcodec.toLowerCase();
+      final isAudioFmt = vcLower == 'none' ||
+          (vcodec.isEmpty && height <= 0 && audioOnlyExts.contains(ext));
+      if (isAudioFmt) continue;
 
       final fps = parseIntValue(fmt['fps'], fallback: 30);
       final tbr = parseDoubleValue(fmt['tbr']);
-      final progressive = acodec.isNotEmpty && acodec != 'none';
+      final progressive = acodec.toLowerCase() != 'none';
       final needsMerge = !progressive;
       final bucket = bucketForResolution(height, fps);
+      final fmtHeaders = mergeCookiesIntoHeaders(
+        mergeHeaderMaps(fallbackHeaders, toHeaderMap(fmt['http_headers'])),
+        fmt['cookies'],
+      );
 
       final option = VideoFormatOption(
         formatId: fmt['format_id']?.toString() ?? '',
@@ -145,8 +189,7 @@ class FormatRanker {
         tbrKbps: tbr,
         isProgressive: progressive,
         videoUrl: url,
-        videoHeaders:
-            mergeHeaderMaps(fallbackHeaders, toHeaderMap(fmt['http_headers'])),
+        videoHeaders: fmtHeaders,
         audioUrl: needsMerge ? defaultAudio?.url : null,
         audioHeaders: needsMerge
             ? (defaultAudio?.httpHeaders ?? const <String, String>{})
@@ -181,7 +224,10 @@ class FormatRanker {
   }) {
     final byKey = <String, ScoredCandidate<AudioTrack>>{};
     final rootLang = normalizeLanguageCode(root['language']?.toString());
-    final fallbackHeaders = toHeaderMap(root['http_headers']);
+    final fallbackHeaders = mergeCookiesIntoHeaders(
+      toHeaderMap(root['http_headers']),
+      root['cookies'],
+    );
     final duration = parseDoubleValue(root['duration']);
 
     for (final fmt in formats) {
@@ -216,8 +262,10 @@ class FormatRanker {
         filesize: resolveFormatFilesize(fmt,
             rootDuration: duration, tbrKbps: abr.toDouble()),
         isOriginal: isOriginal,
-        httpHeaders:
-            mergeHeaderMaps(fallbackHeaders, toHeaderMap(fmt['http_headers'])),
+        httpHeaders: mergeCookiesIntoHeaders(
+          mergeHeaderMaps(fallbackHeaders, toHeaderMap(fmt['http_headers'])),
+          fmt['cookies'],
+        ),
       );
 
       final isDirect =

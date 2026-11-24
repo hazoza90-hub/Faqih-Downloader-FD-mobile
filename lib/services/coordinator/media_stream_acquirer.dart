@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
@@ -6,8 +7,10 @@ import '../../core/models/audio_track.dart';
 import '../../core/models/download_status.dart';
 import '../../core/models/video_format_option.dart';
 import '../../engine/engine_callbacks.dart';
+import '../../engine/http_client_factory.dart';
 import '../../engine/isolate_download_runner.dart';
 import '../../platform/youtube_dl_channel.dart';
+import '../media/media_exceptions.dart';
 import 'download_job_models.dart';
 import 'ytdlp_stream_downloader.dart';
 
@@ -133,8 +136,13 @@ class MediaStreamAcquirer {
           setActivePhase: setActivePhase,
           onTurboProgress: onTurboProgress,
         );
-      } on TurboExpiredException {
+      } catch (err) {
         if (isCancelled()) rethrow;
+        if (err is MediaExtractionException &&
+            err.kind == MediaErrorKind.cancelled) {
+          rethrow;
+        }
+        _cleanupTurboArtifacts(jobDir);
       }
     }
 
@@ -174,7 +182,11 @@ class MediaStreamAcquirer {
       await runTurboTransfer(
         url: audioUrl,
         destinationPath: audioPath,
-        headers: {...request.headers, ...?audio?.httpHeaders},
+        headers: _mergeStreamHeaders(
+          audioUrl,
+          {...request.headers, ...?audio?.httpHeaders},
+          request.cookiesFile,
+        ),
         maxConnections: request.maxConnections,
         speedLimitBytesPerSec: speedLimitBytesPerSec,
         phase: DownloadPhase.downloadingAudio,
@@ -192,7 +204,11 @@ class MediaStreamAcquirer {
     await runTurboTransfer(
       url: fmt.videoUrl,
       destinationPath: vPath,
-      headers: {...request.headers, ...fmt.videoHeaders},
+      headers: _mergeStreamHeaders(
+        fmt.videoUrl,
+        {...request.headers, ...fmt.videoHeaders},
+        request.cookiesFile,
+      ),
       maxConnections: request.maxConnections,
       speedLimitBytesPerSec: speedLimitBytesPerSec,
       phase: DownloadPhase.downloadingVideo,
@@ -213,7 +229,11 @@ class MediaStreamAcquirer {
       await runTurboTransfer(
         url: aUrl,
         destinationPath: aPath,
-        headers: {...request.headers, ...fmt.audioHeaders, ...?audio?.httpHeaders},
+        headers: _mergeStreamHeaders(
+          aUrl,
+          {...request.headers, ...fmt.audioHeaders, ...?audio?.httpHeaders},
+          request.cookiesFile,
+        ),
         maxConnections: request.maxConnections,
         speedLimitBytesPerSec: speedLimitBytesPerSec,
         phase: DownloadPhase.downloadingAudio,
@@ -226,28 +246,80 @@ class MediaStreamAcquirer {
     return AcquiredMediaFiles(videoPath: vPath, audioPath: aPath);
   }
 
+  static Map<String, String> _mergeStreamHeaders(
+    String url,
+    Map<String, String> rawHeaders,
+    String? cookiesFile,
+  ) {
+    final hasCookie = rawHeaders.entries.any(
+      (e) => e.key.toLowerCase() == 'cookie' && e.value.trim().isNotEmpty,
+    );
+    if (hasCookie) return rawHeaders;
+    final cookieStr = HttpClientFactory.extractNetscapeCookieHeader(
+      cookiesFile,
+      url,
+    );
+    if (cookieStr.isEmpty) return rawHeaders;
+    return HttpClientFactory.withCookieHeader(rawHeaders, cookieStr);
+  }
+
+  static void _cleanupTurboArtifacts(String jobDir) {
+    try {
+      final dir = Directory(jobDir);
+      if (!dir.existsSync()) return;
+      for (final entity in dir.listSync()) {
+        final name = p.basename(entity.path);
+        if (name.startsWith('raw_video.') ||
+            name.startsWith('raw_audio.') ||
+            name.endsWith('.sd_parts') ||
+            name.contains('.part')) {
+          try {
+            entity.deleteSync(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
   static bool canTryTurbo(
     DownloadJobRequest request,
     VideoFormatOption? fmt,
     AudioTrack? audio,
   ) {
     if (request.audioOnly) {
+      if (fmt != null && fmt.isHlsOrDash) return false;
       final url = audio?.url ?? fmt?.audioUrl ?? fmt?.videoUrl ?? '';
-      return url.isNotEmpty && !isManifestUrl(url);
+      final ext = (audio?.ext ?? fmt?.audioExt ?? '').trim().toLowerCase();
+      if (ext == 'm3u8' || ext == 'mpd') return false;
+      return url.isNotEmpty &&
+          !isManifestUrl(url, protocol: fmt?.protocol ?? '');
     }
     if (fmt == null || !fmt.isDirectTurboSupported) return false;
+    if (isManifestUrl(fmt.videoUrl, protocol: fmt.protocol)) return false;
     final wantsSeparateAudio =
         fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
     if (wantsSeparateAudio) {
       final aUrl =
           (audio?.url.isNotEmpty ?? false) ? audio!.url : (fmt.audioUrl ?? '');
-      if (aUrl.isNotEmpty && isManifestUrl(aUrl)) return false;
+      final aExt = (audio?.ext ?? fmt.audioExt).trim().toLowerCase();
+      if (aExt == 'm3u8' || aExt == 'mpd') return false;
+      if (aUrl.isNotEmpty && isManifestUrl(aUrl, protocol: fmt.protocol)) {
+        return false;
+      }
     }
     return true;
   }
 
-  static bool isManifestUrl(String url) {
+  static bool isManifestUrl(String url, {String protocol = ''}) {
+    final pLower = protocol.toLowerCase();
     final u = url.toLowerCase();
-    return u.contains('.m3u8') || u.contains('.mpd');
+    return pLower.contains('m3u8') ||
+        pLower.contains('hls') ||
+        pLower.contains('dash') ||
+        pLower.contains('f4m') ||
+        u.contains('.m3u8') ||
+        u.contains('.mpd') ||
+        u.contains('/manifest/hls') ||
+        u.contains('/manifest/dash');
   }
 }

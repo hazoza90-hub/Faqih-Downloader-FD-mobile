@@ -19,6 +19,13 @@ class MediaExtractorService {
   final YoutubeDlChannel _channel;
   final FormatRanker _ranker;
   final TikTokFallbackExtractor _tiktokFallback;
+  bool _autoUpdatedThisSession = false;
+  Future<bool>? _inFlightAutoUpdate;
+
+  static const List<String> _ytFallbackStrategies = <String>[
+    '',
+    'youtube:player_client=mweb,web_safari,ios',
+  ];
 
   Future<YouTubeStreamInfo> extractInfo(
     String url, {
@@ -41,33 +48,101 @@ class MediaExtractorService {
         processId ?? 'extract_${DateTime.now().microsecondsSinceEpoch}';
     final cookieAttempts = _buildCookieAttempts(cleanUrl, cookiesFile);
 
-    MediaExtractionException? lastError;
-    YouTubeStreamInfo? bestResult;
-    for (final attemptCookie in cookieAttempts) {
-      try {
-        final info = await _runSingleExtract(
-          cleanUrl: cleanUrl,
-          processId: effectiveId,
-          cookiesFile: attemptCookie,
-          userAgent: userAgent,
-          headers: headers,
-          playlistItems: playlistItems,
-          timeoutSeconds: timeoutSeconds,
-        );
-        if (_hasUsableStreams(info)) return info;
-        bestResult = info;
-      } on MediaExtractionException catch (e) {
-        if (e.kind == MediaErrorKind.cancelled) rethrow;
-        lastError = e;
-      }
-    }
+    final firstPass = await _extractWithStrategies(
+      cleanUrl: cleanUrl,
+      processId: effectiveId,
+      cookieAttempts: cookieAttempts,
+      userAgent: userAgent,
+      headers: headers,
+      playlistItems: playlistItems,
+      timeoutSeconds: timeoutSeconds,
+    );
+    if (firstPass.usable != null) return firstPass.usable!;
 
     if (UrlDetector.isTikTokUrl(cleanUrl)) {
       final fallback = await _tiktokFallback.extract(cleanUrl);
       if (fallback != null && _hasUsableStreams(fallback)) return fallback;
     }
-    if (bestResult != null) return bestResult;
-    throw lastError!;
+
+    if (await _tryAutoUpdateOnce()) {
+      final retryPass = await _extractWithStrategies(
+        cleanUrl: cleanUrl,
+        processId: effectiveId,
+        cookieAttempts: cookieAttempts,
+        userAgent: userAgent,
+        headers: headers,
+        playlistItems: playlistItems,
+        timeoutSeconds: timeoutSeconds,
+      );
+      if (retryPass.usable != null) return retryPass.usable!;
+      if (retryPass.bestPartial != null) return retryPass.bestPartial!;
+      if (retryPass.lastError != null) throw retryPass.lastError!;
+    }
+
+    if (firstPass.bestPartial != null) return firstPass.bestPartial!;
+    throw firstPass.lastError!;
+  }
+
+  Future<({YouTubeStreamInfo? usable, YouTubeStreamInfo? bestPartial, MediaExtractionException? lastError})>
+      _extractWithStrategies({
+    required String cleanUrl,
+    required String processId,
+    required List<String?> cookieAttempts,
+    required String? userAgent,
+    required Map<String, String>? headers,
+    required String? playlistItems,
+    required int timeoutSeconds,
+  }) async {
+    final strategies = UrlDetector.isYouTubeUrl(cleanUrl)
+        ? <String?>[null, ..._ytFallbackStrategies]
+        : const <String?>[null];
+
+    MediaExtractionException? lastError;
+    YouTubeStreamInfo? bestResult;
+    for (final strategy in strategies) {
+      for (final attemptCookie in cookieAttempts) {
+        try {
+          final info = await _runSingleExtract(
+            cleanUrl: cleanUrl,
+            processId: processId,
+            cookiesFile: attemptCookie,
+            userAgent: userAgent,
+            headers: headers,
+            playlistItems: playlistItems,
+            timeoutSeconds: timeoutSeconds,
+            extractorArgs: strategy,
+          );
+          if (_hasUsableStreams(info)) {
+            return (usable: info, bestPartial: bestResult, lastError: lastError);
+          }
+          bestResult = info;
+        } on MediaExtractionException catch (e) {
+          if (e.kind == MediaErrorKind.cancelled) rethrow;
+          lastError = e;
+        }
+      }
+    }
+    return (usable: null, bestPartial: bestResult, lastError: lastError);
+  }
+
+  Future<bool> _tryAutoUpdateOnce() async {
+    if (_autoUpdatedThisSession) return false;
+    final inFlight = _inFlightAutoUpdate;
+    if (inFlight != null) return inFlight;
+
+    _autoUpdatedThisSession = true;
+    final fut = () async {
+      try {
+        final res = await _channel.updateYoutubeDL();
+        return res.status.toUpperCase() == 'DONE';
+      } catch (_) {
+        return false;
+      } finally {
+        _inFlightAutoUpdate = null;
+      }
+    }();
+    _inFlightAutoUpdate = fut;
+    return fut;
   }
 
   List<String?> _buildCookieAttempts(String cleanUrl, String? cookiesFile) {
@@ -85,6 +160,7 @@ class MediaExtractorService {
     required Map<String, String>? headers,
     required String? playlistItems,
     required int timeoutSeconds,
+    String? extractorArgs,
   }) async {
     try {
       final rawJson = await _channel.extractInfo(
@@ -95,6 +171,7 @@ class MediaExtractorService {
         headers: headers,
         playlistItems: playlistItems,
         timeoutSeconds: timeoutSeconds,
+        extractorArgs: extractorArgs,
       );
       if (rawJson.trim().isEmpty) {
         throw const MediaExtractionException(
