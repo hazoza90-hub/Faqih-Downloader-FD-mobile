@@ -37,6 +37,15 @@ class ShareIntentChannel {
     return UrlDetector.extractUrls(text);
   }
 
+  Future<bool> moveTaskToBack() async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('moveTaskToBack');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Stream<String> get sharedTextStream {
     return _eventChannel
         .receiveBroadcastStream()

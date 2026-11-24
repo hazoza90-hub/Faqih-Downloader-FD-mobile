@@ -11,6 +11,7 @@ import '../core/i18n/translator.dart';
 import '../core/models/history_entry.dart';
 import '../core/models/subtitle_track.dart';
 import '../core/utils/url_detector.dart';
+import '../platform/background_capture_channel.dart';
 import '../platform/cookies_channel.dart';
 import '../platform/floating_capture_channel.dart';
 import '../platform/foreground_service_channel.dart';
@@ -20,14 +21,13 @@ import '../platform/share_intent_channel.dart';
 import '../platform/youtube_dl_channel.dart';
 import '../services/coordinator/download_job_models.dart';
 import '../services/coordinator/download_queue_manager.dart';
-import '../services/coordinator/stream_download_coordinator.dart';
 import '../services/history/history_manager.dart';
 import '../services/history/history_storage.dart';
-import '../services/media/ffmpeg_media_processor.dart';
 import '../services/media/media_extractor_service.dart';
 import '../services/resolver/html_download_resolver.dart';
 import '../services/resolver/smart_url_analyzer.dart';
 import '../services/updater/github_release_updater.dart';
+import 'capture_integrations_helper.dart';
 import 'vault_storage_actions.dart';
 
 export 'vault_storage_actions.dart' show UrlAnalysisResult;
@@ -46,6 +46,7 @@ class AppController extends ChangeNotifier {
     ForegroundServiceChannel? foregroundServiceChannel,
     CookiesChannel? cookiesChannel,
     FloatingCaptureChannel? floatingCaptureChannel,
+    BackgroundCaptureChannel? backgroundCaptureChannel,
     HtmlDownloadResolver? htmlResolver,
     GitHubReleaseUpdater? updater,
     this.autoInitNative = true,
@@ -60,11 +61,12 @@ class AppController extends ChangeNotifier {
         _foregroundService = foregroundServiceChannel ?? ForegroundServiceChannel(),
         _cookies = cookiesChannel ?? CookiesChannel(),
         _floatingCapture = floatingCaptureChannel ?? FloatingCaptureChannel(),
-        _htmlResolver = htmlResolver ?? HtmlDownloadResolver(),
-        _updater = updater ??
-            GitHubReleaseUpdater(
-              mediaStoreChannel: mediaStoreChannel ?? MediaStoreChannel(),
-            );
+        _backgroundCapture = backgroundCaptureChannel ?? BackgroundCaptureChannel(),
+        _updater = updater ?? GitHubReleaseUpdater(mediaStoreChannel: mediaStoreChannel ?? MediaStoreChannel()),
+        _analyzer = SmartUrlAnalyzer(
+          extractor: extractorService ?? MediaExtractorService(channel: youtubeDlChannel ?? YoutubeDlChannel()),
+          htmlResolver: htmlResolver,
+        );
 
   final AppTranslator translator;
   final bool autoInitNative;
@@ -75,13 +77,9 @@ class AppController extends ChangeNotifier {
   final ForegroundServiceChannel _foregroundService;
   final CookiesChannel _cookies;
   final FloatingCaptureChannel _floatingCapture;
-  final HtmlDownloadResolver _htmlResolver;
+  final BackgroundCaptureChannel _backgroundCapture;
   final GitHubReleaseUpdater _updater;
-
-  late final SmartUrlAnalyzer _analyzer = SmartUrlAnalyzer(
-    extractor: _extractor,
-    htmlResolver: _htmlResolver,
-  );
+  final SmartUrlAnalyzer _analyzer;
 
   SettingsRepository? _settingsRepo;
   DownloadHistoryManager? _history;
@@ -89,8 +87,8 @@ class AppController extends ChangeNotifier {
 
   AppSettings _settings = const AppSettings();
   final List<String> _stagedUrls = <String>[];
-  final StreamController<String> _incomingSharedCtrl =
-      StreamController<String>.broadcast();
+  final List<String> _pendingSharedUrls = <String>[];
+  final StreamController<List<String>> _incomingSharedBatchCtrl = StreamController<List<String>>.broadcast();
   StreamSubscription<List<String>>? _shareSub;
 
   bool _initialized = false;
@@ -103,8 +101,15 @@ class AppController extends ChangeNotifier {
   late final VaultStorageActions _vaultActions = VaultStorageActions(
     mediaStore: _mediaStore,
     cookies: _cookies,
-    floatingCapture: _floatingCapture,
     historyProvider: () => _history,
+    settingsProvider: () => _settings,
+    saveSettings: updateSettings,
+  );
+
+  late final CaptureIntegrationsHelper _captureHelper = CaptureIntegrationsHelper(
+    floatingCapture: _floatingCapture,
+    backgroundCapture: _backgroundCapture,
+    translator: translator,
     settingsProvider: () => _settings,
     saveSettings: updateSettings,
   );
@@ -115,7 +120,8 @@ class AppController extends ChangeNotifier {
   bool get isExtracting => _isExtracting;
   AppSettings get settings => _settings;
   List<String> get stagedUrls => List<String>.unmodifiable(_stagedUrls);
-  Stream<String> get sharedUrlsStream => _incomingSharedCtrl.stream;
+  Stream<String> get sharedUrlsStream => _incomingSharedBatchCtrl.stream.expand((e) => e);
+  Stream<List<String>> get sharedUrlBatchesStream => _incomingSharedBatchCtrl.stream;
   GitHubReleaseUpdater get updater => _updater;
   DownloadHistoryManager? get historyManager => _history;
   DownloadQueueManager? get queueManager => _queue;
@@ -143,36 +149,28 @@ class AppController extends ChangeNotifier {
     }
     _history!.addListener(notifyListeners);
 
-    _queue ??= DownloadQueueManager(
+    _queue ??= VaultStorageActions.createDefaultQueue(
       settings: _settings,
       foregroundService: _foregroundService,
+      youtubeDl: _youtubeDl,
+      mediaStore: _mediaStore,
+      historyProvider: () => _history,
       pauseLabel: translator.tr('notif_pause_all'),
       cancelLabel: translator.tr('notif_cancel_all'),
-      coordinatorFactory: (req, {required onStateChanged}) =>
-          StreamDownloadCoordinator(
-        request: req,
-        youtubeDlChannel: _youtubeDl,
-        mediaStoreChannel: _mediaStore,
-        ffmpegProcessor: FfmpegMediaProcessor(channel: _youtubeDl),
-        historyManager: _history,
-        onStateChanged: onStateChanged,
-      ),
     );
     _queue!.addListener(notifyListeners);
 
     try {
       final initial = await _shareIntent.consumeInitialSharedUrls();
       for (final u in initial) {
-        if (!_stagedUrls.contains(u)) _stagedUrls.add(u);
+        if (!_pendingSharedUrls.contains(u)) _pendingSharedUrls.add(u);
       }
     } catch (_) {}
 
     try {
       _shareSub = _shareIntent.sharedUrlsStream.listen(
         (urls) {
-          for (final u in urls) {
-            _incomingSharedCtrl.add(u);
-          }
+          if (urls.isNotEmpty) _incomingSharedBatchCtrl.add(urls);
         },
         onError: (_) {},
       );
@@ -186,6 +184,13 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  List<String> consumePendingSharedUrls() {
+    if (_pendingSharedUrls.isEmpty) return const <String>[];
+    final out = List<String>.unmodifiable(_pendingSharedUrls);
+    _pendingSharedUrls.clear();
+    return out;
+  }
+
   Future<void> _initNativeEngineInBackground() async {
     try {
       final status = await _youtubeDl.initialize();
@@ -193,13 +198,7 @@ class AppController extends ChangeNotifier {
       _ytdlpVersion = status.ytdlpVersion;
       notifyListeners();
     } catch (_) {}
-    await _vaultActions.syncFloatingCaptureOnBoot(
-      title: translator.tr('notif_capture_title'),
-      body: translator.tr('notif_capture_body'),
-      captureLabel: translator.tr('notif_capture_btn'),
-      stopLabel: translator.tr('notif_capture_stop'),
-      emptyClipboardMsg: translator.tr('msg_capture_no_url'),
-    );
+    await _captureHelper.syncOnBoot();
   }
 
   Future<UrlAnalysisResult> analyzeUrl(String rawUrl) async {
@@ -326,6 +325,9 @@ class AppController extends ChangeNotifier {
 
   Future<void> updateSettings(AppSettings next) async {
     final langChanged = next.language != _settings.language;
+    final captureDirty = langChanged ||
+        next.backgroundAutoSnifferEnabled != _settings.backgroundAutoSnifferEnabled ||
+        next.snifferPlatforms != _settings.snifferPlatforms;
     _settings = next;
     if (langChanged) {
       await translator.setLanguage(next.language);
@@ -336,6 +338,9 @@ class AppController extends ChangeNotifier {
     }
     await _settingsRepo?.save(next);
     _queue?.updateSettings(next);
+    if (captureDirty) {
+      unawaited(_captureHelper.pushAutoSnifferConfig());
+    }
     notifyListeners();
   }
 
@@ -348,7 +353,6 @@ class AppController extends ChangeNotifier {
 
   Future<int> saveWebViewCookies(List<String> urls) => _vaultActions.saveWebViewCookies(urls);
   Future<void> clearCookies() => _vaultActions.clearCookies();
-
   Future<bool> openVaultEntry(HistoryEntry entry) => _vaultActions.openEntry(entry);
   Future<bool> shareVaultEntry(HistoryEntry entry) => _vaultActions.shareEntry(entry);
   Future<void> deleteVaultEntry(HistoryEntry entry, {required bool deleteFile}) =>
@@ -358,17 +362,16 @@ class AppController extends ChangeNotifier {
   Future<bool> pickCustomSaveDirectory() => _vaultActions.pickCustomSaveDirectory();
   Future<void> resetSaveDirectory() => _vaultActions.resetSaveDirectory();
   Future<SubtitleTrack?> pickExternalSubtitleFile() => _vaultActions.pickExternalSubtitleFile();
-  Future<void> requestNotificationPermissionOnce() =>
-      _vaultActions.requestNotificationPermissionOnce();
-  Future<bool> setFloatingCaptureEnabled(bool enabled) => _vaultActions.setFloatingCaptureEnabled(
-        enabled,
-        title: translator.tr('notif_capture_title'),
-        body: translator.tr('notif_capture_body'),
-        captureLabel: translator.tr('notif_capture_btn'),
-        stopLabel: translator.tr('notif_capture_stop'),
-        emptyClipboardMsg: translator.tr('msg_capture_no_url'),
-      );
-  Future<void> syncFloatingCaptureState() => _vaultActions.syncFloatingCaptureState();
+  Future<void> requestNotificationPermissionOnce() => _vaultActions.requestNotificationPermissionOnce();
+  Future<bool> moveAppToBack() => _shareIntent.moveTaskToBack();
+  Future<bool> setFloatingCaptureEnabled(bool enabled) => _captureHelper.setFloatingCaptureEnabled(enabled);
+  Future<void> syncFloatingCaptureState() => _captureHelper.syncFloatingCaptureState();
+  Future<bool> setBackgroundAutoSnifferEnabled(bool enabled) => _captureHelper.setBackgroundAutoSnifferEnabled(enabled);
+  Future<bool> syncAccessibilityState({bool enableIfGranted = false}) => _captureHelper.syncAccessibilityState(enableIfGranted: enableIfGranted);
+  Future<bool> openAccessibilitySettings() => _captureHelper.openAccessibilitySettings();
+  Future<bool> openAppDetailsSettings() => _captureHelper.openAppDetailsSettings();
+  Future<bool> setQuickTileEnabled(bool enabled) => _captureHelper.setQuickTileEnabled(enabled);
+  Future<void> promptAddQuickTileOnce() => _captureHelper.promptAddQuickTileOnce();
 
   String? _effectiveCookiesFile() {
     final path = _settings.cookiesFilePath.trim();
@@ -379,7 +382,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(_shareSub?.cancel());
-    unawaited(_incomingSharedCtrl.close());
+    unawaited(_incomingSharedBatchCtrl.close());
     _history?.removeListener(notifyListeners);
     _queue?.removeListener(notifyListeners);
     super.dispose();

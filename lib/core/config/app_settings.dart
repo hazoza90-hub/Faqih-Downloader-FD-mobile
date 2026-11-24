@@ -32,6 +32,9 @@ class AppSettings {
     this.clipboardAutoAnalyze = false,
     Map<String, bool>? snifferPlatforms,
     this.floatingCaptureEnabled = false,
+    this.backgroundAutoSnifferEnabled = false,
+    this.quickTileEnabled = true,
+    this.quickTilePrompted = false,
     this.boardLayoutMode = 'kanban',
     this.customSaveTreeUri = '',
     this.customSaveDisplayLabel = '',
@@ -57,6 +60,9 @@ class AppSettings {
   final bool clipboardAutoAnalyze;
   final Map<String, bool> snifferPlatforms;
   final bool floatingCaptureEnabled;
+  final bool backgroundAutoSnifferEnabled;
+  final bool quickTileEnabled;
+  final bool quickTilePrompted;
   final String boardLayoutMode;
   final String customSaveTreeUri;
   final String customSaveDisplayLabel;
@@ -82,6 +88,9 @@ class AppSettings {
     bool? clipboardAutoAnalyze,
     Map<String, bool>? snifferPlatforms,
     bool? floatingCaptureEnabled,
+    bool? backgroundAutoSnifferEnabled,
+    bool? quickTileEnabled,
+    bool? quickTilePrompted,
     String? boardLayoutMode,
     String? customSaveTreeUri,
     String? customSaveDisplayLabel,
@@ -109,6 +118,10 @@ class AppSettings {
       clipboardAutoAnalyze: clipboardAutoAnalyze ?? this.clipboardAutoAnalyze,
       snifferPlatforms: _normalizePlatforms(snifferPlatforms ?? this.snifferPlatforms),
       floatingCaptureEnabled: floatingCaptureEnabled ?? this.floatingCaptureEnabled,
+      backgroundAutoSnifferEnabled:
+          backgroundAutoSnifferEnabled ?? this.backgroundAutoSnifferEnabled,
+      quickTileEnabled: quickTileEnabled ?? this.quickTileEnabled,
+      quickTilePrompted: quickTilePrompted ?? this.quickTilePrompted,
       boardLayoutMode: _normalizeBoardLayoutMode(boardLayoutMode ?? this.boardLayoutMode),
       customSaveTreeUri: (customSaveTreeUri ?? this.customSaveTreeUri).trim(),
       customSaveDisplayLabel: (customSaveDisplayLabel ?? this.customSaveDisplayLabel).trim(),
@@ -137,6 +150,9 @@ class AppSettings {
       'clipboardAutoAnalyze': clipboardAutoAnalyze,
       'snifferPlatforms': snifferPlatforms,
       'floatingCaptureEnabled': floatingCaptureEnabled,
+      'backgroundAutoSnifferEnabled': backgroundAutoSnifferEnabled,
+      'quickTileEnabled': quickTileEnabled,
+      'quickTilePrompted': quickTilePrompted,
       'boardLayoutMode': boardLayoutMode,
       'customSaveTreeUri': customSaveTreeUri,
       'customSaveDisplayLabel': customSaveDisplayLabel,
@@ -170,6 +186,10 @@ class AppSettings {
       clipboardAutoAnalyze: _parseBool(json['clipboardAutoAnalyze'], false),
       snifferPlatforms: _normalizePlatforms(json['snifferPlatforms']),
       floatingCaptureEnabled: _parseBool(json['floatingCaptureEnabled'], false),
+      backgroundAutoSnifferEnabled:
+          _parseBool(json['backgroundAutoSnifferEnabled'], false),
+      quickTileEnabled: _parseBool(json['quickTileEnabled'], true),
+      quickTilePrompted: _parseBool(json['quickTilePrompted'], false),
       boardLayoutMode: _normalizeBoardLayoutMode(json['boardLayoutMode']?.toString()),
       customSaveTreeUri: (json['customSaveTreeUri']?.toString() ?? '').trim(),
       customSaveDisplayLabel: (json['customSaveDisplayLabel']?.toString() ?? '').trim(),
@@ -269,6 +289,9 @@ class AppSettings {
         other.clipboardAutoAnalyze == clipboardAutoAnalyze &&
         mapEquals(other.snifferPlatforms, snifferPlatforms) &&
         other.floatingCaptureEnabled == floatingCaptureEnabled &&
+        other.backgroundAutoSnifferEnabled == backgroundAutoSnifferEnabled &&
+        other.quickTileEnabled == quickTileEnabled &&
+        other.quickTilePrompted == quickTilePrompted &&
         other.boardLayoutMode == boardLayoutMode &&
         other.customSaveTreeUri == customSaveTreeUri &&
         other.customSaveDisplayLabel == customSaveDisplayLabel &&
@@ -296,6 +319,9 @@ class AppSettings {
     clipboardAutoAnalyze,
     ...snifferPlatforms.entries.map((e) => Object.hash(e.key, e.value)),
     floatingCaptureEnabled,
+    backgroundAutoSnifferEnabled,
+    quickTileEnabled,
+    quickTilePrompted,
     boardLayoutMode,
     customSaveTreeUri,
     customSaveDisplayLabel,

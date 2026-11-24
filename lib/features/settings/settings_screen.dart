@@ -7,7 +7,9 @@ import '../../core/config/app_constants.dart';
 import '../../core/i18n/translator.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/size_formatter.dart';
+import 'accessibility_permission_dialog.dart';
 import 'cookies_login_screen.dart';
+import 'settings_general_section.dart';
 import 'settings_media_prefs_section.dart';
 import 'settings_sniffer_section.dart';
 import 'settings_storage_section.dart';
@@ -28,7 +30,7 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   static const List<int> _speedPresets = <int>[
     0,
     500 * 1024,
@@ -40,11 +42,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _updatingYtDlp = false;
   bool _checkingAppUpdate = false;
+  bool _awaitingAccessibilityGrant = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(widget.controller.syncFloatingCaptureState());
+    unawaited(widget.controller.syncAccessibilityState());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final checkGrant = _awaitingAccessibilityGrant;
+      unawaited(widget.controller.syncFloatingCaptureState());
+      unawaited(
+        widget.controller.syncAccessibilityState(enableIfGranted: checkGrant).then((granted) {
+          if (mounted && granted) _awaitingAccessibilityGrant = false;
+        }),
+      );
+    }
   }
 
   void _showSnack(ScaffoldMessengerState messenger, String message) {
@@ -119,48 +143,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.all(14),
             children: <Widget>[
               _SectionTitle(tr('settings_general')),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(tr('lbl_language'), style: const TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: <Widget>[
-                          ChoiceChip(
-                            key: const Key('settings_lang_ar'),
-                            label: Text(tr('lbl_lang_ar')),
-                            selected: s.language == 'ar',
-                            onSelected: (_) => widget.controller.updateSettings(s.copyWith(language: 'ar')),
-                          ),
-                          ChoiceChip(
-                            key: const Key('settings_lang_en'),
-                            label: Text(tr('lbl_lang_en')),
-                            selected: s.language == 'en',
-                            onSelected: (_) => widget.controller.updateSettings(s.copyWith(language: 'en')),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(tr('lbl_theme'), style: const TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        children: <String>['dark', 'light', 'system'].map((mode) {
-                          return ChoiceChip(
-                            key: Key('settings_theme_$mode'),
-                            label: Text(tr('theme_$mode')),
-                            selected: s.themeMode == mode,
-                            onSelected: (_) => widget.controller.updateSettings(s.copyWith(themeMode: mode)),
-                          );
-                        }).toList(growable: false),
-                      ),
-                    ],
-                  ),
-                ),
+              SettingsGeneralSection(
+                translator: widget.translator,
+                settings: s,
+                onChanged: (next) => widget.controller.updateSettings(next),
               ),
               const SizedBox(height: 14),
               _SectionTitle(tr('settings_network')),
@@ -257,6 +243,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 translator: widget.translator,
                 settings: s,
                 onChanged: (next) => widget.controller.updateSettings(next),
+                onToggleQuickTile: (v) => unawaited(widget.controller.setQuickTileEnabled(v)),
+                onToggleBackgroundAutoSniffer: (v) async {
+                  final ok = await widget.controller.setBackgroundAutoSnifferEnabled(v);
+                  if (!ok && context.mounted) {
+                    _awaitingAccessibilityGrant = true;
+                    await showAccessibilityPermissionDialog(
+                      context: context,
+                      translator: widget.translator,
+                      onOpenAccessibility: () => unawaited(widget.controller.openAccessibilitySettings()),
+                      onOpenAppDetails: () => unawaited(widget.controller.openAppDetailsSettings()),
+                    );
+                  }
+                },
                 onToggleFloatingCapture: (v) async {
                   final messenger = ScaffoldMessenger.of(context);
                   final ok = await widget.controller.setFloatingCaptureEnabled(v);

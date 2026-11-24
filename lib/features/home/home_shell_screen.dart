@@ -43,7 +43,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   final List<String> _fallbackStagedUrls = <String>[];
   int _selectedTabIndex = 0;
   String _fallbackLayoutMode = 'kanban';
-  StreamSubscription<String>? _shareSub;
+  StreamSubscription<List<String>>? _shareSub;
   ClipboardSnifferService? _sniffer;
   String? _snifferBannerUrl;
 
@@ -53,21 +53,37 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     final ctrl = widget.controller;
     if (ctrl != null) {
       unawaited(ctrl.requestNotificationPermissionOnce());
-      _shareSub = ctrl.sharedUrlsStream.listen((url) {
-        if (!mounted) return;
-        _urlController.text = url;
-        _sniffer?.markSeen(url);
-        _showSnack(
-          ScaffoldMessenger.of(context),
-          widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}),
-        );
-        unawaited(_analyzeAndRoute(url));
+      _shareSub = ctrl.sharedUrlBatchesStream.listen((urls) {
+        if (!mounted || urls.isEmpty) return;
+        if (urls.length > 1) {
+          _stageMultipleUrls(urls);
+        } else {
+          _openSharedSingleUrl(urls.first);
+        }
       });
       _sniffer = ClipboardSnifferService(
         settingsProvider: () => ctrl.settings,
         onUrlDetected: _handleClipboardDetected,
       )..start(checkImmediately: true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        consumeInitialShareAndQuickTile(
+          controller: ctrl,
+          onSingleSharedUrl: _openSharedSingleUrl,
+          onMultipleSharedUrls: _stageMultipleUrls,
+        );
+      });
     }
+  }
+
+  void _openSharedSingleUrl(String url) {
+    _urlController.text = url;
+    _sniffer?.markSeen(url);
+    _showSnack(
+      ScaffoldMessenger.of(context),
+      widget.translator.tr('msg_shared_url_received', params: <String, String>{'url': url}),
+    );
+    unawaited(_analyzeAndRoute(url, fromExternalShare: true));
   }
 
   @override
@@ -174,7 +190,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
   void _showSnack(ScaffoldMessengerState messenger, String msg) =>
       messenger.showSnackBar(SnackBar(content: Text(msg)));
 
-  Future<void> _analyzeAndRoute(String url) async {
+  Future<void> _analyzeAndRoute(String url, {bool fromExternalShare = false}) async {
     final ctrl = widget.controller;
     if (ctrl == null || !mounted) return;
     await analyzeAndRouteUrl(
@@ -183,6 +199,7 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       controller: ctrl,
       translator: widget.translator,
       url: url,
+      fromExternalShare: fromExternalShare,
       onSelectColumn: (idx) {
         if (mounted) setState(() => _selectedTabIndex = idx);
       },
@@ -230,7 +247,6 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     return ListenableBuilder(
       listenable: listenable,
       builder: (context, _) {
-        final tr = widget.translator.tr;
         final staged = ctrl?.stagedUrls ?? _fallbackStagedUrls;
         final queue = ctrl?.queueManager;
         final activeJobs = <DownloadJobState>[
@@ -356,38 +372,13 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
           ),
           bottomNavigationBar: isKanban
               ? null
-              : NavigationBar(
+              : buildClassicBottomNavBar(
+                  translator: widget.translator,
                   selectedIndex: _selectedTabIndex,
                   onDestinationSelected: (i) => setState(() => _selectedTabIndex = i),
-                  destinations: <NavigationDestination>[
-                    NavigationDestination(
-                      key: const Key('tab_staged'),
-                      icon: Badge(
-                        isLabelVisible: staged.isNotEmpty,
-                        label: Text('${staged.length}'),
-                        child: const Icon(Icons.inventory_2_outlined),
-                      ),
-                      label: tr('tab_staged'),
-                    ),
-                    NavigationDestination(
-                      key: const Key('tab_active'),
-                      icon: Badge(
-                        isLabelVisible: activeJobs.isNotEmpty,
-                        label: Text('${activeJobs.length}'),
-                        child: const Icon(Icons.bolt_rounded),
-                      ),
-                      label: tr('tab_active'),
-                    ),
-                    NavigationDestination(
-                      key: const Key('tab_vault'),
-                      icon: Badge(
-                        isLabelVisible: vaultEntries.isNotEmpty,
-                        label: Text('${vaultEntries.length}'),
-                        child: const Icon(Icons.folder_zip_outlined),
-                      ),
-                      label: tr('tab_vault'),
-                    ),
-                  ],
+                  stagedCount: staged.length,
+                  activeCount: activeJobs.length,
+                  vaultCount: vaultEntries.length,
                 ),
         );
       },

@@ -8,11 +8,15 @@ import '../core/models/youtube_stream_info.dart';
 import '../core/utils/filename_sanitizer.dart';
 import '../core/utils/url_detector.dart';
 import '../platform/cookies_channel.dart';
-import '../platform/floating_capture_channel.dart';
+import '../platform/foreground_service_channel.dart';
 import '../platform/media_store_channel.dart';
+import '../platform/youtube_dl_channel.dart';
 import '../services/coordinator/download_job_models.dart';
+import '../services/coordinator/download_queue_manager.dart';
 import '../services/coordinator/job_export_helper.dart';
+import '../services/coordinator/stream_download_coordinator.dart';
 import '../services/history/history_manager.dart';
+import '../services/media/ffmpeg_media_processor.dart';
 
 /// Result returned when analyzing a user URL (either direct HTTP or rich media info).
 @immutable
@@ -36,20 +40,17 @@ class VaultStorageActions {
   VaultStorageActions({
     required MediaStoreChannel mediaStore,
     required CookiesChannel cookies,
-    FloatingCaptureChannel? floatingCapture,
     required DownloadHistoryManager? Function() historyProvider,
     required AppSettings Function() settingsProvider,
     required Future<void> Function(AppSettings next) saveSettings,
   })  : _mediaStore = mediaStore,
         _cookies = cookies,
-        _floatingCapture = floatingCapture ?? FloatingCaptureChannel(),
         _historyProvider = historyProvider,
         _settingsProvider = settingsProvider,
         _saveSettings = saveSettings;
 
   final MediaStoreChannel _mediaStore;
   final CookiesChannel _cookies;
-  final FloatingCaptureChannel _floatingCapture;
   final DownloadHistoryManager? Function() _historyProvider;
   final AppSettings Function() _settingsProvider;
   final Future<void> Function(AppSettings next) _saveSettings;
@@ -135,68 +136,6 @@ class VaultStorageActions {
     await _mediaStore.requestNotificationPermission();
   }
 
-  Future<bool> setFloatingCaptureEnabled(
-    bool enabled, {
-    required String title,
-    required String body,
-    required String captureLabel,
-    required String stopLabel,
-    required String emptyClipboardMsg,
-  }) async {
-    if (!enabled) {
-      await _floatingCapture.stopFloatingCapture().catchError((_) => false);
-      await _saveSettings(_settingsProvider().copyWith(floatingCaptureEnabled: false));
-      return true;
-    }
-    final allowed = await _floatingCapture.canDrawOverlays();
-    if (!allowed) {
-      await _floatingCapture.requestOverlayPermission();
-      return false;
-    }
-    await _floatingCapture.startFloatingCapture(
-      title: title,
-      body: body,
-      captureLabel: captureLabel,
-      stopLabel: stopLabel,
-      emptyClipboardMsg: emptyClipboardMsg,
-    );
-    await _saveSettings(_settingsProvider().copyWith(floatingCaptureEnabled: true));
-    return true;
-  }
-
-  Future<void> syncFloatingCaptureOnBoot({
-    required String title,
-    required String body,
-    required String captureLabel,
-    required String stopLabel,
-    required String emptyClipboardMsg,
-  }) async {
-    if (!_settingsProvider().floatingCaptureEnabled) return;
-    try {
-      final allowed = await _floatingCapture.canDrawOverlays();
-      if (!allowed) return;
-      await _floatingCapture.startFloatingCapture(
-        title: title,
-        body: body,
-        captureLabel: captureLabel,
-        stopLabel: stopLabel,
-        emptyClipboardMsg: emptyClipboardMsg,
-      );
-    } catch (_) {}
-  }
-
-  Future<void> syncFloatingCaptureState() async {
-    if (!_settingsProvider().floatingCaptureEnabled) return;
-    try {
-      final running = await _floatingCapture.isRunning();
-      if (!running && _settingsProvider().floatingCaptureEnabled) {
-        await _saveSettings(
-          _settingsProvider().copyWith(floatingCaptureEnabled: false),
-        );
-      }
-    } catch (_) {}
-  }
-
   static DownloadJobRequest buildBasicRequest({
     required String id,
     required String url,
@@ -260,5 +199,30 @@ class VaultStorageActions {
         autoCategorizeFolders: settings.autoCategorizeFolders,
         subtitlePosition: settings.subtitlePosition,
         subtitleFontSize: settings.subtitleFontSize,
+      );
+
+  static DownloadQueueManager createDefaultQueue({
+    required AppSettings settings,
+    required ForegroundServiceChannel foregroundService,
+    required YoutubeDlChannel youtubeDl,
+    required MediaStoreChannel mediaStore,
+    required DownloadHistoryManager? Function() historyProvider,
+    required String pauseLabel,
+    required String cancelLabel,
+  }) =>
+      DownloadQueueManager(
+        settings: settings,
+        foregroundService: foregroundService,
+        pauseLabel: pauseLabel,
+        cancelLabel: cancelLabel,
+        coordinatorFactory: (req, {required onStateChanged}) =>
+            StreamDownloadCoordinator(
+          request: req,
+          youtubeDlChannel: youtubeDl,
+          mediaStoreChannel: mediaStore,
+          ffmpegProcessor: FfmpegMediaProcessor(channel: youtubeDl),
+          historyManager: historyProvider(),
+          onStateChanged: onStateChanged,
+        ),
       );
 }

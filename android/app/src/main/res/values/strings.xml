@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_clipboard_desc">Detects when you tap Copy Link so Faqih Downloader can show a quiet download notification without reading screen content or showing a floating bubble.</string>
+</resources>

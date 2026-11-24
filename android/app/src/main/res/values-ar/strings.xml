@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_clipboard_desc">يرصد لحظة الضغط على زر نسخ الرابط لإظهار إشعار تحميل هادئ تلقائيًا دون قراءة محتوى الشاشة ودون فقاعة عائمة.</string>
+</resources>

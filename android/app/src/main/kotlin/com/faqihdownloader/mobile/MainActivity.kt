@@ -1,6 +1,7 @@
 package com.faqihdownloader.mobile
 
 import android.content.Intent
+import com.faqihdownloader.mobile.bridge.BackgroundCaptureBridge
 import com.faqihdownloader.mobile.bridge.CookiesBridge
 import com.faqihdownloader.mobile.bridge.FloatingCaptureBridge
 import com.faqihdownloader.mobile.bridge.ForegroundServiceBridge
@@ -17,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private var mediaStoreBridge: MediaStoreBridge? = null
     private var cookiesBridge: CookiesBridge? = null
     private var floatingCaptureBridge: FloatingCaptureBridge? = null
+    private var backgroundCaptureBridge: BackgroundCaptureBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,13 +26,14 @@ class MainActivity : FlutterActivity() {
 
         youtubeDlBridge = YoutubeDlBridge(applicationContext).apply { attach(messenger) }
         foregroundServiceBridge = ForegroundServiceBridge(applicationContext).apply { attach(messenger) }
-        shareIntentBridge = ShareIntentBridge().apply {
+        shareIntentBridge = ShareIntentBridge(applicationContext) { this }.apply {
             attach(messenger)
             captureInitialIntent(intent)
         }
         mediaStoreBridge = MediaStoreBridge(applicationContext) { this }.apply { attach(messenger) }
         cookiesBridge = CookiesBridge().apply { attach(messenger) }
         floatingCaptureBridge = FloatingCaptureBridge(applicationContext).apply { attach(messenger) }
+        backgroundCaptureBridge = BackgroundCaptureBridge(applicationContext).apply { attach(messenger) }
     }
 
     @Suppress("DEPRECATION")
@@ -61,12 +64,14 @@ class MainActivity : FlutterActivity() {
         mediaStoreBridge?.dispose()
         cookiesBridge?.dispose()
         floatingCaptureBridge?.dispose()
+        backgroundCaptureBridge?.dispose()
         youtubeDlBridge = null
         foregroundServiceBridge = null
         shareIntentBridge = null
         mediaStoreBridge = null
         cookiesBridge = null
         floatingCaptureBridge = null
+        backgroundCaptureBridge = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

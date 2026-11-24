@@ -11,12 +11,16 @@ class SettingsSnifferSection extends StatelessWidget {
     required this.settings,
     required this.onChanged,
     this.onToggleFloatingCapture,
+    this.onToggleQuickTile,
+    this.onToggleBackgroundAutoSniffer,
   });
 
   final AppTranslator translator;
   final AppSettings settings;
   final void Function(AppSettings next) onChanged;
   final ValueChanged<bool>? onToggleFloatingCapture;
+  final ValueChanged<bool>? onToggleQuickTile;
+  final ValueChanged<bool>? onToggleBackgroundAutoSniffer;
 
   static const List<String> _platformKeys = <String>[
     'youtube',
@@ -52,6 +56,30 @@ class SettingsSnifferSection extends StatelessWidget {
                   ? (v) => onChanged(settings.copyWith(clipboardAutoAnalyze: v))
                   : null,
             ),
+            if (onToggleQuickTile != null)
+              SwitchListTile(
+                key: const Key('settings_quick_tile_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(tr('sniffer_quick_tile')),
+                subtitle: Text(
+                  tr('sniffer_quick_tile_desc'),
+                  style: const TextStyle(fontSize: 11),
+                ),
+                value: settings.quickTileEnabled,
+                onChanged: onToggleQuickTile,
+              ),
+            if (onToggleBackgroundAutoSniffer != null)
+              SwitchListTile(
+                key: const Key('settings_bg_auto_sniffer_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: Text(tr('sniffer_bg_auto')),
+                subtitle: Text(
+                  tr('sniffer_bg_auto_desc'),
+                  style: const TextStyle(fontSize: 11),
+                ),
+                value: settings.backgroundAutoSnifferEnabled,
+                onChanged: onToggleBackgroundAutoSniffer,
+              ),
             if (onToggleFloatingCapture != null)
               SwitchListTile(
                 key: const Key('settings_floating_capture_switch'),

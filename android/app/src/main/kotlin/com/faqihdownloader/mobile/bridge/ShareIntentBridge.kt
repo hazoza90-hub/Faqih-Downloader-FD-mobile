@@ -1,5 +1,7 @@
 package com.faqihdownloader.mobile.bridge
 
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
@@ -8,11 +10,15 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+class ShareIntentBridge(
+    private val appContext: Context,
+    private val activityProvider: () -> Activity? = { null },
+) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
         const val METHOD_CHANNEL = "com.faqihdownloader.mobile/share_intent"
         const val EVENT_CHANNEL = "com.faqihdownloader.mobile/share_events"
+        private val URL_REGEX = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
 
         @Volatile
         var activeInstance: ShareIntentBridge? = null
@@ -56,7 +62,7 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
 
     fun deliverText(rawText: String) {
         val text = rawText.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty() || !URL_REGEX.containsMatchIn(text)) return
         val sink = eventSink
         if (sink != null) {
             mainHandler.post { sink.success(text) }
@@ -88,6 +94,12 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
                 initialSharedText = null
                 result.success(text)
             }
+            "moveTaskToBack" -> {
+                val moved = runCatching {
+                    activityProvider()?.moveTaskToBack(true) ?: false
+                }.getOrDefault(false)
+                result.success(moved)
+            }
             else -> result.notImplemented()
         }
     }
@@ -95,15 +107,26 @@ class ShareIntentBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHa
     private fun extractSharedText(intent: Intent?): String? {
         if (intent == null) return null
         if (intent.action == Intent.ACTION_PROCESS_TEXT) {
-            val selected = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()?.trim()
-            return if (selected.isNullOrEmpty()) null else selected
+            val selected = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)
+                ?.toString()?.trim()
+            return if (!selected.isNullOrEmpty() && URL_REGEX.containsMatchIn(selected)) selected else null
         }
         if (intent.action != Intent.ACTION_SEND) return null
-        val type = intent.type ?: return null
+        val type = intent.type?.lowercase() ?: return null
         if (!type.startsWith("text/")) return null
-        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
-        if (!sharedText.isNullOrEmpty()) return sharedText
-        val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)?.trim()
-        return if (sharedSubject.isNullOrEmpty()) null else sharedSubject
+
+        val extraText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
+        if (!extraText.isNullOrEmpty() && URL_REGEX.containsMatchIn(extraText)) return extraText
+
+        val extraSubject = intent.getCharSequenceExtra(Intent.EXTRA_SUBJECT)?.toString()?.trim()
+        if (!extraSubject.isNullOrEmpty() && URL_REGEX.containsMatchIn(extraSubject)) return extraSubject
+
+        val clipText = runCatching {
+            val clip = intent.clipData
+            if (clip != null && clip.itemCount > 0) {
+                clip.getItemAt(0).coerceToText(appContext)?.toString()?.trim()
+            } else null
+        }.getOrNull()
+        return if (!clipText.isNullOrEmpty() && URL_REGEX.containsMatchIn(clipText)) clipText else null
     }
 }
