@@ -65,7 +65,7 @@ void main() {
         throw PlatformException(code: 'YOUTUBEDL_ERROR', message: 'Sign in to confirm you are not a bot');
       });
       await expectLater(
-        extractor.extractInfo('https://youtube.com/watch?v=abc', processId: 'ext_2'),
+        extractor.extractInfo('https://youtube.com/watch?v=def', processId: 'ext_2'),
         throwsA(isA<MediaExtractionException>().having((e) => e.kind, 'kind', MediaErrorKind.loginRequired)),
       );
     });

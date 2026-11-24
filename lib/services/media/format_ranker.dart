@@ -5,6 +5,7 @@ import '../../core/models/subtitle_track.dart';
 import '../../core/models/video_format_option.dart';
 import '../../core/models/youtube_stream_info.dart';
 import '../../core/utils/filename_sanitizer.dart';
+import '../../core/utils/url_detector.dart';
 import 'format_ranker_helpers.dart';
 
 /// Pure Dart parser and ranker for `yt-dlp --dump-single-json` output.
@@ -45,7 +46,7 @@ class FormatRanker {
         }
       }
       final hasVideoPayload = single.containsKey('formats') ||
-          (single['url']?.toString().trim().isNotEmpty ?? false);
+          UrlDetector.isHttpUrl(single['url']?.toString().trim() ?? '');
       if (rawType != 'playlist' || hasVideoPayload) {
         return parse(single, fallbackUrl: fallbackUrl);
       }
@@ -72,8 +73,9 @@ class FormatRanker {
       );
     }
 
+    final rawDirectUrl = raw['url']?.toString().trim() ?? '';
     var formats = readFormatMaps(raw['formats']);
-    if (formats.isEmpty && (raw['url']?.toString().trim().isNotEmpty ?? false)) {
+    if (formats.isEmpty && UrlDetector.isHttpUrl(rawDirectUrl)) {
       formats = <Map<String, dynamic>>[raw];
     }
     final audioTracks = rankAudioTracks(formats, root: raw);
@@ -101,7 +103,8 @@ class FormatRanker {
       title: title,
       cleanFilename: sanitizeFilename('$title.$ext'),
       isProgressive: bestVideo?.isProgressive ?? false,
-      videoUrl: bestVideo?.videoUrl ?? raw['url']?.toString() ?? '',
+      videoUrl: bestVideo?.videoUrl ??
+          (UrlDetector.isHttpUrl(rawDirectUrl) ? rawDirectUrl : ''),
       videoHeaders: bestVideo?.videoHeaders ?? rootHeaders,
       videoExt: ext,
       videoResolution:

@@ -85,10 +85,30 @@ String readMediaTitle(Map<String, dynamic> raw, {required String fallback}) {
   return t.isEmpty ? fallback : t;
 }
 
+final RegExp _bareYouTubeIdRegex = RegExp(r'^[a-zA-Z0-9_-]{11}$');
+
 String readMediaWebpageUrl(Map<String, dynamic> raw, String fallbackUrl) {
-  final u =
+  final primary =
       (raw['webpage_url'] ?? raw['original_url'])?.toString().trim() ?? '';
-  return u.isEmpty ? fallbackUrl : u;
+  if (primary.isNotEmpty) {
+    return primary.startsWith('/') ? 'https://www.youtube.com$primary' : primary;
+  }
+  final rawUrl = raw['url']?.toString().trim() ?? '';
+  if (rawUrl.isNotEmpty) {
+    if (UrlDetector.isHttpUrl(rawUrl)) return rawUrl;
+    if (rawUrl.startsWith('/')) return 'https://www.youtube.com$rawUrl';
+    if (_bareYouTubeIdRegex.hasMatch(rawUrl)) {
+      return 'https://www.youtube.com/watch?v=$rawUrl';
+    }
+  }
+  final rawId = raw['id']?.toString().trim() ?? '';
+  final extractor =
+      '${raw['ie_key'] ?? ''} ${raw['extractor_key'] ?? ''}'.toLowerCase();
+  if (_bareYouTubeIdRegex.hasMatch(rawId) &&
+      (extractor.contains('youtube') || UrlDetector.isYouTubeUrl(fallbackUrl))) {
+    return 'https://www.youtube.com/watch?v=$rawId';
+  }
+  return fallbackUrl;
 }
 
 String resolveMediaPlatform(String url, Map<String, dynamic> raw) {

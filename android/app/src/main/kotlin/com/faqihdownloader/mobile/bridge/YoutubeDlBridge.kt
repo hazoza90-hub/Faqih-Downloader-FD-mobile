@@ -27,8 +27,10 @@ class YoutubeDlBridge(private val appContext: Context) :
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val initLock = Any()
-    private val initialized = AtomicBoolean(false)
+    private val ytdlInitLock = Any()
+    private val ytdlInitialized = AtomicBoolean(false)
+    private val ffmpegInitLock = Any()
+    private val ffmpegInitialized = AtomicBoolean(false)
     private val ffmpegRunner = FfmpegProcessRunner(appContext)
 
     private var methodChannel: MethodChannel? = null
@@ -64,15 +66,16 @@ class YoutubeDlBridge(private val appContext: Context) :
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "initialize" -> runAsync(result) {
-                ensureInitialized()
+                ensureYoutubeDlInitialized()
+                scope.launch { runCatching { ensureFfmpegInitialized() } }
                 mapOf(
                     "initialized" to true,
                     "ytdlpVersion" to (YoutubeDL.getInstance().version(appContext) ?: "unknown"),
-                    "ffmpegReady" to true,
+                    "ffmpegReady" to ffmpegInitialized.get(),
                 )
             }
             "updateYoutubeDL" -> runAsync(result) {
-                ensureInitialized()
+                ensureYoutubeDlInitialized()
                 val status = YoutubeDL.getInstance().updateYoutubeDL(
                     appContext,
                     YoutubeDL.UpdateChannel.STABLE,
@@ -105,17 +108,25 @@ class YoutubeDlBridge(private val appContext: Context) :
         val extractorArgs = call.argument<String>("extractorArgs")
 
         runAsync(result) {
-            ensureInitialized()
+            ensureYoutubeDlInitialized()
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-single-json")
+            request.addOption("--skip-download")
             request.addOption("--no-warnings")
             request.addOption("--no-check-certificates")
-            val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 30
+            request.addOption("--no-cache-dir")
+            request.addOption("--no-check-formats")
+            request.addOption("--extractor-retries", "1")
+            request.addOption("--retries", "1")
+            request.addOption("--force-ipv4")
+            val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 15
             request.addOption("--socket-timeout", effectiveTimeout.toString())
             applyExtractorArgs(request, url, extractorArgs)
             if (!playlistItems.isNullOrBlank()) {
                 request.addOption("--playlist-items", playlistItems.trim())
-            } else if (!isYouTubePlaylistUrl(url)) {
+            } else if (isYouTubePlaylistUrl(url)) {
+                request.addOption("--flat-playlist")
+            } else {
                 request.addOption("--no-playlist")
             }
             if (!cookiesFile.isNullOrBlank()) {
@@ -144,7 +155,7 @@ class YoutubeDlBridge(private val appContext: Context) :
         val extractorArgs = call.argument<String>("extractorArgs")
 
         runAsync(result) {
-            ensureInitialized()
+            ensureYoutubeDlInitialized()
             val request = YoutubeDLRequest(url)
             if (!hasFlag(args, options, "--no-check-certificates")) {
                 request.addOption("--no-check-certificates")
@@ -199,7 +210,7 @@ class YoutubeDlBridge(private val appContext: Context) :
             return
         }
         runAsync(result) {
-            ensureInitialized()
+            ensureFfmpegInitialized()
             val res = ffmpegRunner.run(args, processId) { line ->
                 emitEvent(mapOf("type" to "ffmpeg_log", "processId" to processId, "line" to line))
             }
@@ -233,20 +244,28 @@ class YoutubeDlBridge(private val appContext: Context) :
         if (extractorArgs != null) {
             if (extractorArgs.isNotBlank()) request.addOption("--extractor-args", extractorArgs)
         } else if (isYouTubeUrl(url)) {
-            request.addOption("--extractor-args", "youtube:player_client=android_vr,default,tv")
+            request.addOption("--extractor-args", "youtube:player_client=android_vr;player_skip=webpage,configs")
         }
     }
 
     private fun hasFlag(args: List<String>, options: Map<String, Any?>, flag: String): Boolean =
         options.containsKey(flag) || args.any { it == flag || it.startsWith("$flag=") }
 
-    private fun ensureInitialized() {
-        if (initialized.get()) return
-        synchronized(initLock) {
-            if (initialized.get()) return
+    private fun ensureYoutubeDlInitialized() {
+        if (ytdlInitialized.get()) return
+        synchronized(ytdlInitLock) {
+            if (ytdlInitialized.get()) return
             YoutubeDL.getInstance().init(appContext)
+            ytdlInitialized.set(true)
+        }
+    }
+
+    private fun ensureFfmpegInitialized() {
+        if (ffmpegInitialized.get()) return
+        synchronized(ffmpegInitLock) {
+            if (ffmpegInitialized.get()) return
             FFmpeg.getInstance().init(appContext)
-            initialized.set(true)
+            ffmpegInitialized.set(true)
         }
     }
 

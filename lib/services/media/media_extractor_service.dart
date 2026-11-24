@@ -5,27 +5,39 @@ import '../../platform/youtube_dl_channel.dart';
 import 'format_ranker.dart';
 import 'media_exceptions.dart';
 import 'tiktok_fallback_extractor.dart';
+import 'youtube_innertube_extractor.dart';
 
-/// Extracts ranked video, dubbing, and subtitle metadata via [YoutubeDlChannel].
+/// Extracts ranked video, dubbing, and subtitle metadata via InnerTube and [YoutubeDlChannel].
 class MediaExtractorService {
   MediaExtractorService({
     YoutubeDlChannel? channel,
     FormatRanker ranker = const FormatRanker(),
     TikTokFallbackExtractor? tiktokFallback,
+    YouTubeInnerTubeExtractor? innerTubeExtractor,
+    DateTime Function()? clock,
   })  : _channel = channel ?? YoutubeDlChannel(),
         _ranker = ranker,
-        _tiktokFallback = tiktokFallback ?? TikTokFallbackExtractor(ranker: ranker);
+        _tiktokFallback = tiktokFallback ?? TikTokFallbackExtractor(ranker: ranker),
+        _innerTube = innerTubeExtractor ?? YouTubeInnerTubeExtractor(ranker: ranker),
+        _clock = clock ?? DateTime.now;
+
+  static const Duration cacheTtl = Duration(minutes: 3);
+  static const int maxCacheEntries = 25;
 
   final YoutubeDlChannel _channel;
   final FormatRanker _ranker;
   final TikTokFallbackExtractor _tiktokFallback;
+  final YouTubeInnerTubeExtractor _innerTube;
+  final DateTime Function() _clock;
   final Set<String> _cancelledIds = <String>{};
+  final Map<String, ({YouTubeStreamInfo info, DateTime cachedAt})> _cache =
+      <String, ({YouTubeStreamInfo info, DateTime cachedAt})>{};
   bool _autoUpdatedThisSession = false;
   Future<bool>? _inFlightAutoUpdate;
 
   static const List<String> _ytFallbackStrategies = <String>[
+    'youtube:player_client=ios,mweb',
     '',
-    'youtube:player_client=mweb,web_safari,ios',
   ];
 
   void _throwIfCancelled(String processId) {
@@ -37,6 +49,23 @@ class MediaExtractorService {
     }
   }
 
+  YouTubeStreamInfo? _readCache(String key) {
+    final entry = _cache.remove(key);
+    if (entry == null) return null;
+    if (_clock().difference(entry.cachedAt) > cacheTtl) return null;
+    _cache[key] = entry;
+    return entry.info;
+  }
+
+  void _writeCache(String key, YouTubeStreamInfo info) {
+    if (!_hasUsableStreams(info)) return;
+    _cache.remove(key);
+    while (_cache.length >= maxCacheEntries) {
+      _cache.remove(_cache.keys.first);
+    }
+    _cache[key] = (info: info, cachedAt: _clock());
+  }
+
   Future<YouTubeStreamInfo> extractInfo(
     String url, {
     String? cookiesFile,
@@ -44,7 +73,7 @@ class MediaExtractorService {
     Map<String, String>? headers,
     String? playlistItems,
     String? processId,
-    int timeoutSeconds = 30,
+    int timeoutSeconds = 15,
   }) async {
     final cleanUrl = url.trim();
     if (!UrlDetector.isHttpUrl(cleanUrl)) {
@@ -56,26 +85,49 @@ class MediaExtractorService {
 
     final effectiveId =
         processId ?? 'extract_${DateTime.now().microsecondsSinceEpoch}';
-    final cookieAttempts = _buildCookieAttempts(cleanUrl, cookiesFile);
+    final trimmedPlaylist = playlistItems?.trim() ?? '';
+    final cacheKey = '$cleanUrl|$trimmedPlaylist';
 
     try {
       _throwIfCancelled(effectiveId);
+      final cached = _readCache(cacheKey);
+      if (cached != null) return cached;
+
+      final isSingleYouTube = UrlDetector.extractYouTubeId(cleanUrl) != null &&
+          !cleanUrl.toLowerCase().contains('/playlist?') &&
+          trimmedPlaylist.isEmpty;
+      if (isSingleYouTube) {
+        final fast = await _innerTube.extract(cleanUrl);
+        _throwIfCancelled(effectiveId);
+        if (fast != null && _hasUsableStreams(fast)) {
+          _writeCache(cacheKey, fast);
+          return fast;
+        }
+      }
+
+      final trimmedCookies = cookiesFile?.trim() ?? '';
       final firstPass = await _extractWithStrategies(
         cleanUrl: cleanUrl,
         processId: effectiveId,
-        cookieAttempts: cookieAttempts,
+        cookiesFile: trimmedCookies,
         userAgent: userAgent,
         headers: headers,
         playlistItems: playlistItems,
         timeoutSeconds: timeoutSeconds,
       );
-      if (firstPass.usable != null) return firstPass.usable!;
+      if (firstPass.usable != null) {
+        _writeCache(cacheKey, firstPass.usable!);
+        return firstPass.usable!;
+      }
       _throwIfCancelled(effectiveId);
 
       if (UrlDetector.isTikTokUrl(cleanUrl)) {
         final fallback = await _tiktokFallback.extract(cleanUrl);
         _throwIfCancelled(effectiveId);
-        if (fallback != null && _hasUsableStreams(fallback)) return fallback;
+        if (fallback != null && _hasUsableStreams(fallback)) {
+          _writeCache(cacheKey, fallback);
+          return fallback;
+        }
       }
 
       final skipAutoUpdate = !UrlDetector.isMediaUrl(cleanUrl) &&
@@ -85,13 +137,16 @@ class MediaExtractorService {
         final retryPass = await _extractWithStrategies(
           cleanUrl: cleanUrl,
           processId: effectiveId,
-          cookieAttempts: cookieAttempts,
+          cookiesFile: trimmedCookies,
           userAgent: userAgent,
           headers: headers,
           playlistItems: playlistItems,
           timeoutSeconds: timeoutSeconds,
         );
-        if (retryPass.usable != null) return retryPass.usable!;
+        if (retryPass.usable != null) {
+          _writeCache(cacheKey, retryPass.usable!);
+          return retryPass.usable!;
+        }
         if (retryPass.bestPartial != null) return retryPass.bestPartial!;
         if (retryPass.lastError != null) throw retryPass.lastError!;
       }
@@ -107,26 +162,26 @@ class MediaExtractorService {
       _extractWithStrategies({
     required String cleanUrl,
     required String processId,
-    required List<String?> cookieAttempts,
+    required String cookiesFile,
     required String? userAgent,
     required Map<String, String>? headers,
     required String? playlistItems,
     required int timeoutSeconds,
   }) async {
-    final strategies = UrlDetector.isYouTubeUrl(cleanUrl)
-        ? <String?>[null, ..._ytFallbackStrategies]
-        : const <String?>[null];
+    final isYouTube = UrlDetector.isYouTubeUrl(cleanUrl);
+    final strategies = isYouTube ? <String?>[null, ..._ytFallbackStrategies] : const <String?>[null];
 
     MediaExtractionException? lastError;
     YouTubeStreamInfo? bestResult;
-    for (final strategy in strategies) {
-      for (final attemptCookie in cookieAttempts) {
+
+    if (isYouTube) {
+      for (final strategy in strategies) {
         _throwIfCancelled(processId);
         try {
           final info = await _runSingleExtract(
             cleanUrl: cleanUrl,
             processId: processId,
-            cookiesFile: attemptCookie,
+            cookiesFile: null,
             userAgent: userAgent,
             headers: headers,
             playlistItems: playlistItems,
@@ -140,7 +195,63 @@ class MediaExtractorService {
         } on MediaExtractionException catch (e) {
           if (e.kind == MediaErrorKind.cancelled) rethrow;
           lastError = e;
+          if (e.kind == MediaErrorKind.loginRequired && cookiesFile.isNotEmpty) {
+            break;
+          }
         }
+      }
+
+      final shouldTryCookieOnce = cookiesFile.isNotEmpty &&
+          (lastError == null ||
+              lastError.kind == MediaErrorKind.loginRequired ||
+              lastError.kind == MediaErrorKind.linkExpired ||
+              lastError.kind == MediaErrorKind.unknown);
+      if (shouldTryCookieOnce) {
+        _throwIfCancelled(processId);
+        try {
+          final info = await _runSingleExtract(
+            cleanUrl: cleanUrl,
+            processId: processId,
+            cookiesFile: cookiesFile,
+            userAgent: userAgent,
+            headers: headers,
+            playlistItems: playlistItems,
+            timeoutSeconds: timeoutSeconds,
+            extractorArgs: null,
+          );
+          if (_hasUsableStreams(info)) {
+            return (usable: info, bestPartial: bestResult, lastError: lastError);
+          }
+          bestResult = info;
+        } on MediaExtractionException catch (e) {
+          if (e.kind == MediaErrorKind.cancelled) rethrow;
+          lastError = e;
+        }
+      }
+      return (usable: null, bestPartial: bestResult, lastError: lastError);
+    }
+
+    final cookieAttempts = cookiesFile.isEmpty ? const <String?>[null] : <String?>[cookiesFile, null];
+    for (final attemptCookie in cookieAttempts) {
+      _throwIfCancelled(processId);
+      try {
+        final info = await _runSingleExtract(
+          cleanUrl: cleanUrl,
+          processId: processId,
+          cookiesFile: attemptCookie,
+          userAgent: userAgent,
+          headers: headers,
+          playlistItems: playlistItems,
+          timeoutSeconds: timeoutSeconds,
+          extractorArgs: null,
+        );
+        if (_hasUsableStreams(info)) {
+          return (usable: info, bestPartial: bestResult, lastError: lastError);
+        }
+        bestResult = info;
+      } on MediaExtractionException catch (e) {
+        if (e.kind == MediaErrorKind.cancelled) rethrow;
+        lastError = e;
       }
     }
     return (usable: null, bestPartial: bestResult, lastError: lastError);
@@ -164,13 +275,6 @@ class MediaExtractorService {
     }();
     _inFlightAutoUpdate = fut;
     return fut;
-  }
-
-  List<String?> _buildCookieAttempts(String cleanUrl, String? cookiesFile) {
-    final trimmed = cookiesFile?.trim() ?? '';
-    if (trimmed.isEmpty) return const <String?>[null];
-    if (UrlDetector.isYouTubeUrl(cleanUrl)) return <String?>[null, trimmed];
-    return <String?>[trimmed, null];
   }
 
   Future<YouTubeStreamInfo> _runSingleExtract({
@@ -238,6 +342,7 @@ class MediaExtractorService {
       return MediaErrorKind.unsupportedUrl;
     }
     if (lower.contains('sign in to confirm') ||
+        lower.contains('sign in required') ||
         lower.contains('private video') ||
         lower.contains('login required') ||
         lower.contains('members-only') ||

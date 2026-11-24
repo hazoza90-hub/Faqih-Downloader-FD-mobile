@@ -54,24 +54,23 @@ class AppController extends ChangeNotifier {
         _history = historyManager,
         _queue = queueManager,
         _youtubeDl = youtubeDlChannel ?? YoutubeDlChannel(),
-        _extractor = extractorService ??
-            MediaExtractorService(channel: youtubeDlChannel ?? YoutubeDlChannel()),
+        _providedExtractor = extractorService,
+        _htmlResolver = htmlResolver,
         _shareIntent = shareIntentChannel ?? ShareIntentChannel(),
         _mediaStore = mediaStoreChannel ?? MediaStoreChannel(),
         _foregroundService = foregroundServiceChannel ?? ForegroundServiceChannel(),
         _cookies = cookiesChannel ?? CookiesChannel(),
         _floatingCapture = floatingCaptureChannel ?? FloatingCaptureChannel(),
         _backgroundCapture = backgroundCaptureChannel ?? BackgroundCaptureChannel(),
-        _updater = updater ?? GitHubReleaseUpdater(mediaStoreChannel: mediaStoreChannel ?? MediaStoreChannel()),
-        _analyzer = SmartUrlAnalyzer(
-          extractor: extractorService ?? MediaExtractorService(channel: youtubeDlChannel ?? YoutubeDlChannel()),
-          htmlResolver: htmlResolver,
-        );
+        _updater = updater ?? GitHubReleaseUpdater(mediaStoreChannel: mediaStoreChannel ?? MediaStoreChannel());
 
   final AppTranslator translator;
   final bool autoInitNative;
   final YoutubeDlChannel _youtubeDl;
-  final MediaExtractorService _extractor;
+  final MediaExtractorService? _providedExtractor;
+  final HtmlDownloadResolver? _htmlResolver;
+  late final MediaExtractorService _extractor =
+      _providedExtractor ?? MediaExtractorService(channel: _youtubeDl);
   final ShareIntentChannel _shareIntent;
   final MediaStoreChannel _mediaStore;
   final ForegroundServiceChannel _foregroundService;
@@ -79,7 +78,10 @@ class AppController extends ChangeNotifier {
   final FloatingCaptureChannel _floatingCapture;
   final BackgroundCaptureChannel _backgroundCapture;
   final GitHubReleaseUpdater _updater;
-  final SmartUrlAnalyzer _analyzer;
+  late final SmartUrlAnalyzer _analyzer = SmartUrlAnalyzer(
+    extractor: _extractor,
+    htmlResolver: _htmlResolver,
+  );
 
   SettingsRepository? _settingsRepo;
   DownloadHistoryManager? _history;

@@ -626,8 +626,8 @@ void main() {
       expect(updateCalls, 1);
       expect(seenExtractorArgs.take(3).toList(), <Object?>[
         null,
+        'youtube:player_client=ios,mweb',
         '',
-        'youtube:player_client=mweb,web_safari,ios',
       ]);
 
       // Subsequent permanent failure in same session must NOT trigger updateYoutubeDL again:
