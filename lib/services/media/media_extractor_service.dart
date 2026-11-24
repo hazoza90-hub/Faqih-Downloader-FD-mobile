@@ -19,6 +19,7 @@ class MediaExtractorService {
   final YoutubeDlChannel _channel;
   final FormatRanker _ranker;
   final TikTokFallbackExtractor _tiktokFallback;
+  final Set<String> _cancelledIds = <String>{};
   bool _autoUpdatedThisSession = false;
   Future<bool>? _inFlightAutoUpdate;
 
@@ -26,6 +27,15 @@ class MediaExtractorService {
     '',
     'youtube:player_client=mweb,web_safari,ios',
   ];
+
+  void _throwIfCancelled(String processId) {
+    if (_cancelledIds.contains(processId)) {
+      throw const MediaExtractionException(
+        kind: MediaErrorKind.cancelled,
+        message: 'Extraction cancelled',
+      );
+    }
+  }
 
   Future<YouTubeStreamInfo> extractInfo(
     String url, {
@@ -48,24 +58,9 @@ class MediaExtractorService {
         processId ?? 'extract_${DateTime.now().microsecondsSinceEpoch}';
     final cookieAttempts = _buildCookieAttempts(cleanUrl, cookiesFile);
 
-    final firstPass = await _extractWithStrategies(
-      cleanUrl: cleanUrl,
-      processId: effectiveId,
-      cookieAttempts: cookieAttempts,
-      userAgent: userAgent,
-      headers: headers,
-      playlistItems: playlistItems,
-      timeoutSeconds: timeoutSeconds,
-    );
-    if (firstPass.usable != null) return firstPass.usable!;
-
-    if (UrlDetector.isTikTokUrl(cleanUrl)) {
-      final fallback = await _tiktokFallback.extract(cleanUrl);
-      if (fallback != null && _hasUsableStreams(fallback)) return fallback;
-    }
-
-    if (await _tryAutoUpdateOnce()) {
-      final retryPass = await _extractWithStrategies(
+    try {
+      _throwIfCancelled(effectiveId);
+      final firstPass = await _extractWithStrategies(
         cleanUrl: cleanUrl,
         processId: effectiveId,
         cookieAttempts: cookieAttempts,
@@ -74,13 +69,38 @@ class MediaExtractorService {
         playlistItems: playlistItems,
         timeoutSeconds: timeoutSeconds,
       );
-      if (retryPass.usable != null) return retryPass.usable!;
-      if (retryPass.bestPartial != null) return retryPass.bestPartial!;
-      if (retryPass.lastError != null) throw retryPass.lastError!;
-    }
+      if (firstPass.usable != null) return firstPass.usable!;
+      _throwIfCancelled(effectiveId);
 
-    if (firstPass.bestPartial != null) return firstPass.bestPartial!;
-    throw firstPass.lastError!;
+      if (UrlDetector.isTikTokUrl(cleanUrl)) {
+        final fallback = await _tiktokFallback.extract(cleanUrl);
+        _throwIfCancelled(effectiveId);
+        if (fallback != null && _hasUsableStreams(fallback)) return fallback;
+      }
+
+      final skipAutoUpdate = !UrlDetector.isMediaUrl(cleanUrl) &&
+          firstPass.lastError?.kind == MediaErrorKind.unsupportedUrl;
+      if (!skipAutoUpdate && await _tryAutoUpdateOnce()) {
+        _throwIfCancelled(effectiveId);
+        final retryPass = await _extractWithStrategies(
+          cleanUrl: cleanUrl,
+          processId: effectiveId,
+          cookieAttempts: cookieAttempts,
+          userAgent: userAgent,
+          headers: headers,
+          playlistItems: playlistItems,
+          timeoutSeconds: timeoutSeconds,
+        );
+        if (retryPass.usable != null) return retryPass.usable!;
+        if (retryPass.bestPartial != null) return retryPass.bestPartial!;
+        if (retryPass.lastError != null) throw retryPass.lastError!;
+      }
+
+      if (firstPass.bestPartial != null) return firstPass.bestPartial!;
+      throw firstPass.lastError!;
+    } finally {
+      _cancelledIds.remove(effectiveId);
+    }
   }
 
   Future<({YouTubeStreamInfo? usable, YouTubeStreamInfo? bestPartial, MediaExtractionException? lastError})>
@@ -101,6 +121,7 @@ class MediaExtractorService {
     YouTubeStreamInfo? bestResult;
     for (final strategy in strategies) {
       for (final attemptCookie in cookieAttempts) {
+        _throwIfCancelled(processId);
         try {
           final info = await _runSingleExtract(
             cleanUrl: cleanUrl,
@@ -203,6 +224,7 @@ class MediaExtractorService {
       info.videoUrl.isNotEmpty;
 
   Future<bool> cancelExtraction(String processId) {
+    _cancelledIds.add(processId);
     return _channel.cancelProcess(processId);
   }
 

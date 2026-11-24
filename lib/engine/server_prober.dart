@@ -120,9 +120,17 @@ class ServerProber {
         allowError: true,
         requestedRange: true,
       );
-      if (rangeRes != null && rangeRes.linkExpired) return rangeRes;
+      if (rangeRes != null && rangeRes.linkExpired) {
+        final isRangeAuthBlock =
+            rangeRes.httpStatus == HttpStatus.unauthorized ||
+            rangeRes.httpStatus == HttpStatus.forbidden;
+        if (headOk || !isRangeAuthBlock) return rangeRes;
+      }
 
-      if (rangeRes != null && rangeRes.httpStatus >= 200 && rangeRes.httpStatus < 300) {
+      if (rangeRes != null &&
+          !rangeRes.linkExpired &&
+          rangeRes.httpStatus >= 200 &&
+          rangeRes.httpStatus < 300) {
         result = _mergeProbe(result, rangeRes);
       } else if (!headOk) {
         final plainRes = await _probeGet(

@@ -47,8 +47,12 @@ abstract final class HttpClientFactory {
   }) async {
     var current = uri;
     var currentMethod = method.toUpperCase();
-    final cookies = <String, String>{};
-    seedCookiesFromHeaders(headers, cookies);
+    final initialIsPrivate = isPrivateOrLoopbackHost(uri.host);
+    final cookiesByHost = <String, Map<String, String>>{};
+    final seedHost = uri.host.toLowerCase();
+    final seeded = <String, String>{};
+    seedCookiesFromHeaders(headers, seeded);
+    if (seeded.isNotEmpty) cookiesByHost[seedHost] = seeded;
 
     for (var hop = 0; hop <= maxRedirects; hop++) {
       if (shouldAbort?.call() ?? false) {
@@ -68,8 +72,9 @@ abstract final class HttpClientFactory {
       if (rangeHeader != null && rangeHeader.isNotEmpty) {
         req.headers.set(HttpHeaders.rangeHeader, rangeHeader);
       }
-      if (cookies.isNotEmpty) {
-        req.headers.set(HttpHeaders.cookieHeader, formatCookies(cookies));
+      final outgoingCookies = _cookiesForHost(cookiesByHost, current.host);
+      if (outgoingCookies.isNotEmpty) {
+        req.headers.set(HttpHeaders.cookieHeader, formatCookies(outgoingCookies));
       }
       if (shouldAbort?.call() ?? false) {
         req.abort();
@@ -77,7 +82,7 @@ abstract final class HttpClientFactory {
       }
 
       final resp = await req.close().timeout(timeout);
-      collectCookies(resp, cookies);
+      _collectScopedCookies(resp, current.host, cookiesByHost);
 
       final status = resp.statusCode;
       if (status == HttpStatus.movedPermanently ||
@@ -92,12 +97,20 @@ abstract final class HttpClientFactory {
           return HttpRedirectResult(
             response: resp,
             finalUri: current,
-            cookieHeader: formatCookies(cookies),
+            cookieHeader: formatCookies(_cookiesForHost(cookiesByHost, current.host)),
           );
         }
-        final next = current.resolve(loc.trim());
+        final Uri next;
+        try {
+          next = current.resolve(loc.trim());
+        } on FormatException {
+          throw HttpException('Invalid redirect Location', uri: current);
+        }
         if (!const <String>{'http', 'https'}.contains(next.scheme.toLowerCase())) {
           throw HttpException('Unsupported redirect scheme: ${next.scheme}', uri: next);
+        }
+        if (!initialIsPrivate && isPrivateOrLoopbackHost(next.host)) {
+          throw StateError('SSRF blocked: redirect to private host ${next.host}');
         }
         if (status == HttpStatus.seeOther &&
             currentMethod != 'HEAD' &&
@@ -111,10 +124,118 @@ abstract final class HttpClientFactory {
       return HttpRedirectResult(
         response: resp,
         finalUri: current,
-        cookieHeader: formatCookies(cookies),
+        cookieHeader: formatCookies(_cookiesForHost(cookiesByHost, current.host)),
       );
     }
     throw HttpException('Too many redirects', uri: current);
+  }
+
+  static void _collectScopedCookies(
+    HttpClientResponse resp,
+    String requestHost,
+    Map<String, Map<String, String>> cookiesByHost,
+  ) {
+    final normReqHost = requestHost.toLowerCase();
+    for (final c in resp.cookies) {
+      if (c.name.isEmpty) continue;
+      var rawDomain = (c.domain ?? '').trim().toLowerCase();
+      if (rawDomain.startsWith('.')) rawDomain = rawDomain.substring(1);
+      final scopeHost = (rawDomain.isNotEmpty && isSameSiteOrParentDomain(rawDomain, normReqHost))
+          ? rawDomain
+          : normReqHost;
+      (cookiesByHost[scopeHost] ??= <String, String>{})[c.name] = c.value;
+    }
+  }
+
+  static Map<String, String> _cookiesForHost(
+    Map<String, Map<String, String>> cookiesByHost,
+    String targetHost,
+  ) {
+    final merged = <String, String>{};
+    for (final entry in cookiesByHost.entries) {
+      if (isSameSiteOrParentDomain(entry.key, targetHost)) {
+        merged.addAll(entry.value);
+      }
+    }
+    return merged;
+  }
+
+  static bool isSameSiteOrParentDomain(String hostA, String hostB) {
+    var a = hostA.trim().toLowerCase().replaceAll(RegExp(r'^\.+|\.+$'), '');
+    var b = hostB.trim().toLowerCase().replaceAll(RegExp(r'^\.+|\.+$'), '');
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == b) return true;
+    if (_isIpLiteral(a) || _isIpLiteral(b)) return false;
+    if (a.endsWith('.$b') || b.endsWith('.$a')) return true;
+    return _registrableParent(a) == _registrableParent(b);
+  }
+
+  static String _registrableParent(String host) {
+    final parts = host.split('.');
+    if (parts.length <= 2) return host;
+    const multiPartTlds = <String>{
+      'co.uk', 'org.uk', 'ac.uk', 'gov.uk',
+      'com.au', 'net.au', 'org.au',
+      'co.jp', 'co.in', 'com.br', 'com.eg', 'com.sa', 'com.tr',
+    };
+    final lastTwo = '${parts[parts.length - 2]}.${parts.last}';
+    if (multiPartTlds.contains(lastTwo) && parts.length >= 3) {
+      return parts.sublist(parts.length - 3).join('.');
+    }
+    return lastTwo;
+  }
+
+  static bool _isIpLiteral(String host) {
+    try {
+      Uri.parseIPv4Address(host);
+      return true;
+    } catch (_) {}
+    try {
+      Uri.parseIPv6Address(host);
+      return true;
+    } catch (_) {}
+    return host.contains(':');
+  }
+
+  static bool isPrivateOrLoopbackHost(String hostname) {
+    var h = hostname.trim().toLowerCase();
+    if (h.startsWith('[') && h.endsWith(']')) h = h.substring(1, h.length - 1);
+    final zoneIdx = h.indexOf('%');
+    if (zoneIdx > 0) h = h.substring(0, zoneIdx);
+    if (h.isEmpty || h == 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) {
+      return true;
+    }
+    try {
+      return _isPrivateIpv4Bytes(Uri.parseIPv4Address(h));
+    } catch (_) {}
+    try {
+      final b = Uri.parseIPv6Address(h);
+      var allZero = true;
+      for (var i = 0; i < 15; i++) {
+        if (b[i] != 0) allZero = false;
+      }
+      if (allZero && (b[15] == 0 || b[15] == 1)) return true;
+      if ((b[0] & 0xfe) == 0xfc) return true;
+      if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) return true;
+      if (b[0] == 0xff) return true;
+      if (b.take(10).every((x) => x == 0) && b[10] == 0xff && b[11] == 0xff) {
+        return _isPrivateIpv4Bytes(b.sublist(12, 16));
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  static bool _isPrivateIpv4Bytes(List<int> b) {
+    if (b.length != 4) return false;
+    final a = b[0], c = b[1];
+    return a == 0 ||
+        a == 10 ||
+        a == 127 ||
+        a >= 224 ||
+        (a == 100 && c >= 64 && c <= 127) ||
+        (a == 169 && c == 254) ||
+        (a == 172 && c >= 16 && c <= 31) ||
+        (a == 192 && c == 168);
   }
 
   static void seedCookiesFromHeaders(

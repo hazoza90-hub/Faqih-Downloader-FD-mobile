@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/models/audio_track.dart';
 import '../../core/models/video_format_option.dart';
+import '../../core/utils/url_detector.dart';
 import '../../platform/native_models.dart';
 import '../../platform/youtube_dl_channel.dart';
 import '../media/media_exceptions.dart';
@@ -51,50 +52,102 @@ class YtDlpStreamDownloader {
     } catch (_) {}
 
     final formatSpec = buildSelector(request, formatOption, audioOption);
-    final opts = <String, Object?>{
-      '-f': formatSpec,
-      '-o': p.join(jobDir, 'ytdlp_%(id)s.%(ext)s'),
-      '--no-playlist': true,
-      if (!request.audioOnly) '--merge-output-format': 'mp4',
-      if (request.cookiesFile != null && request.cookiesFile!.isNotEmpty)
-        '--cookies': request.cookiesFile,
-      if (request.headers.isNotEmpty)
-        '--add-header': <String>[
-          for (final e in request.headers.entries) '${e.key}:${e.value}',
-        ],
-    };
+    final isYt = UrlDetector.isYouTubeUrl(request.url);
+    final strategies = isYt
+        ? const <String?>[null, '', 'youtube:player_client=mweb,web_safari,ios']
+        : const <String?>[null];
+    final rawCookie = request.cookiesFile?.trim() ?? '';
+    final cookieAttempts = rawCookie.isEmpty
+        ? const <String?>[null]
+        : (isYt ? <String?>[null, rawCookie] : <String?>[rawCookie, null]);
 
     try {
-      final res = await _youtubeDl.downloadMedia(
-        url: request.url,
-        processId: pid,
-        options: opts,
-      );
-      if (isCancelled()) {
-        throw const MediaExtractionException(
-          kind: MediaErrorKind.cancelled,
-          message: 'Download cancelled',
-        );
+      MediaExtractionException? lastError;
+      for (final strategy in strategies) {
+        for (final attemptCookie in cookieAttempts) {
+          if (isCancelled()) {
+            throw const MediaExtractionException(
+              kind: MediaErrorKind.cancelled,
+              message: 'Download cancelled',
+            );
+          }
+          _cleanupAttemptFiles(jobDir);
+          final opts = <String, Object?>{
+            '-f': formatSpec,
+            '-o': p.join(jobDir, 'ytdlp_%(id)s.%(ext)s'),
+            '--no-playlist': true,
+            if (!request.audioOnly) '--merge-output-format': 'mp4',
+            if (attemptCookie != null && attemptCookie.isNotEmpty)
+              '--cookies': attemptCookie,
+            if (request.headers.isNotEmpty)
+              '--add-header': <String>[
+                for (final e in request.headers.entries) '${e.key}:${e.value}',
+              ],
+          };
+          try {
+            final res = await _youtubeDl.downloadMedia(
+              url: request.url,
+              processId: pid,
+              options: opts,
+              extractorArgs: strategy,
+            );
+            if (isCancelled()) {
+              throw const MediaExtractionException(
+                kind: MediaErrorKind.cancelled,
+                message: 'Download cancelled',
+              );
+            }
+            if (!res.isSuccess) {
+              throw MediaExtractionException(
+                kind: MediaErrorKind.networkError,
+                message: 'yt-dlp failed (${res.exitCode})',
+                rawDetails: res.stderr,
+              );
+            }
+            final downloaded = findDownloadedFile(jobDir);
+            if (downloaded == null) {
+              throw const MediaExtractionException(
+                kind: MediaErrorKind.unknown,
+                message: 'yt-dlp reported success but output file was not found',
+              );
+            }
+            return downloaded;
+          } on MediaExtractionException catch (e) {
+            if (e.kind == MediaErrorKind.cancelled || isCancelled()) rethrow;
+            lastError = e;
+          } catch (e) {
+            if (isCancelled()) {
+              throw const MediaExtractionException(
+                kind: MediaErrorKind.cancelled,
+                message: 'Download cancelled',
+              );
+            }
+            lastError = MediaExtractionException(
+              kind: MediaErrorKind.networkError,
+              message: e.toString(),
+            );
+          }
+        }
       }
-      if (!res.isSuccess) {
-        throw MediaExtractionException(
-          kind: MediaErrorKind.networkError,
-          message: 'yt-dlp failed (${res.exitCode})',
-          rawDetails: res.stderr,
-        );
-      }
-      final downloaded = findDownloadedFile(jobDir);
-      if (downloaded == null) {
-        throw const MediaExtractionException(
-          kind: MediaErrorKind.unknown,
-          message: 'yt-dlp reported success but output file was not found',
-        );
-      }
-      return downloaded;
+      throw lastError!;
     } finally {
       setActiveProcessId(null);
       await sub?.cancel();
     }
+  }
+
+  static void _cleanupAttemptFiles(String jobDir) {
+    try {
+      final dir = Directory(jobDir);
+      if (!dir.existsSync()) return;
+      for (final entity in dir.listSync()) {
+        if (p.basename(entity.path).startsWith('ytdlp_')) {
+          try {
+            entity.deleteSync(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
   }
 
   static String buildSelector(

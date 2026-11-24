@@ -66,7 +66,9 @@ class MediaPostPipeline {
 
     onPhase(DownloadPhase.processingFfmpeg, progress: 0.0);
     final durSec = request.durationSec > 0 ? request.durationSec.toDouble() : null;
+    final sourceExt = p.extension(rawVideoPath).replaceFirst('.', '').trim().toLowerCase();
     var currentPath = rawVideoPath;
+    var remuxedByFfmpeg = false;
 
     if (request.audioOnly) {
       return _processAudioOnly(
@@ -127,6 +129,7 @@ class MediaPostPipeline {
       } finally {
         onTrackProcess(null);
       }
+      remuxedByFfmpeg = true;
       _checkCancelled(isCancelled);
     }
 
@@ -181,6 +184,7 @@ class MediaPostPipeline {
         onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
       );
       onTrackProcess(null);
+      remuxedByFfmpeg = true;
       _checkCancelled(isCancelled);
     }
 
@@ -202,7 +206,8 @@ class MediaPostPipeline {
       return MediaPipelineResult(filePath: currentPath, ext: softExt);
     }
 
-    return MediaPipelineResult(filePath: currentPath, ext: videoExt);
+    final finalExt = (!remuxedByFfmpeg && sourceExt == 'webm') ? 'webm' : videoExt;
+    return MediaPipelineResult(filePath: currentPath, ext: finalExt);
   }
 
   Future<MediaPipelineResult> _processAudioOnly({

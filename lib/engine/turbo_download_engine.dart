@@ -66,6 +66,7 @@ class TurboDownloadEngine {
   double _initialElapsedSec = 0.0;
   bool _isPaused = false;
   bool _isCancelled = false;
+  bool _isResetting = false;
   Object? _fatalError;
   bool _fatalLinkExpired = false;
   int? _fatalHttpStatus;
@@ -136,17 +137,17 @@ class TurboDownloadEngine {
   Future<void> _runInternal() async {
     _isPaused = false;
     _isCancelled = false;
+    _isResetting = false;
     _fatalError = null;
     _fatalLinkExpired = false;
     _fatalHttpStatus = null;
 
     final ownsClient = _injectedClient == null;
-    final client = _injectedClient ??
-        HttpClientFactory.create(
-          connectionTimeout: const Duration(seconds: 20),
-          idleTimeout: const Duration(seconds: 20),
-          maxConnectionsPerHost: math.max(maxConnections + 2, 8),
-        );
+    final client = _injectedClient ?? HttpClientFactory.create(
+      connectionTimeout: const Duration(seconds: 20),
+      idleTimeout: const Duration(seconds: 20),
+      maxConnectionsPerHost: math.max(maxConnections + 2, 8),
+    );
 
     Timer? progressTimer;
     try {
@@ -160,7 +161,7 @@ class TurboDownloadEngine {
 
       var tickCount = 0;
       progressTimer = Timer.periodic(const Duration(milliseconds: 120), (_) {
-        if (_isPaused || _isCancelled || _fatalError != null) return;
+        if (_isPaused || _isCancelled || _isResetting || _fatalError != null) return;
         _emitProgress();
         if (allowDynamicSplit && _supportsRanges) _attemptDynamicSplits(client);
         if (++tickCount % 10 == 0) unawaited(_saveCurrentState());
@@ -170,9 +171,7 @@ class TurboDownloadEngine {
       while (true) {
         await _runWorkerLoop(client);
         if (_isCancelled || _isPaused || _fatalError == null) break;
-        if (!triedSingleStream &&
-            _supportsRanges &&
-            _shouldFallbackToSingleStream()) {
+        if (!triedSingleStream && _supportsRanges && _shouldFallbackToSingleStream()) {
           triedSingleStream = true;
           await _resetToSingleStream();
           continue;
@@ -189,12 +188,14 @@ class TurboDownloadEngine {
       _status = DownloadStatus.merging;
       _emitProgress();
       final assembly = await _assembler.assemble(
-        destinationPath: destinationPath, chunks: _chunks,
-        expectedTotalSize: _totalSize, supportsRanges: _supportsRanges,
+        destinationPath: destinationPath,
+        chunks: _chunks,
+        expectedTotalSize: _supportsRanges ? _totalSize : 0,
+        supportsRanges: _supportsRanges,
         expectedSha256: expectedSha256,
       );
       _speedTracker.pause();
-      if (_totalSize <= 0) _totalSize = assembly.totalBytes;
+      if (!_supportsRanges || _totalSize <= 0) _totalSize = assembly.totalBytes;
       _status = DownloadStatus.completed;
       _emitProgress();
       callbacks?.onComplete?.call(assembly.filePath, assembly.totalBytes, _speedTracker.elapsedActiveSeconds);
@@ -232,10 +233,7 @@ class TurboDownloadEngine {
       _totalSize = init.totalSize;
       _supportsRanges = init.supportsRanges;
       _initialElapsedSec = init.initialElapsedSec;
-      _effectiveHeaders = HttpClientFactory.withCookieHeader(
-        headers,
-        init.cookieHeader,
-      );
+      _effectiveHeaders = HttpClientFactory.withCookieHeader(headers, init.cookieHeader);
       _chunks..clear()..addAll(init.chunks);
       if (!init.restoredFromCheckpoint) await _saveCurrentState();
     } on ProbeException catch (e) {
@@ -367,19 +365,24 @@ class TurboDownloadEngine {
 
   Future<void> _resetToSingleStream() async {
     callbacks?.onLog?.call('[FALLBACK] Retrying as single-stream without Range');
-    _fatalError = null;
+    _isResetting = true;
+    try {
+      _supportsRanges = false;
+      await _saveQueue;
+      await _persistence.cleanupTempDir(destinationPath);
+      _chunks
+        ..clear()
+        ..add(DownloadChunk(
+          chunkId: 0, startByte: 0, endByte: -1,
+          partFilepath: ChunkPersistence.partFilePathFor(destinationPath, 0),
+        ));
+      await _saveCurrentState();
+    } finally {
+      _isResetting = false;
+    }
     _fatalLinkExpired = false;
     _fatalHttpStatus = null;
-    _supportsRanges = false;
-    await _saveQueue;
-    await _persistence.cleanupTempDir(destinationPath);
-    _chunks
-      ..clear()
-      ..add(DownloadChunk(
-        chunkId: 0, startByte: 0, endByte: -1,
-        partFilepath: ChunkPersistence.partFilePathFor(destinationPath, 0),
-      ));
-    await _saveCurrentState();
+    _fatalError = null;
   }
 
   void _abortAllWorkers() {
