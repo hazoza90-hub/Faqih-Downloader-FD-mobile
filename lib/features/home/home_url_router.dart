@@ -8,22 +8,30 @@ import '../../core/models/history_entry.dart';
 import '../media_sheet/media_options_sheet.dart';
 import '../media_sheet/playlist_picker_sheet.dart';
 
-/// Handles cold-start pending share URLs and one-time Android 13+ Quick Tile prompt after first frame.
-void consumeInitialShareAndQuickTile({
+/// Handles cold-start pending share URLs or serializes notification permission + Quick Tile prompt.
+Future<void> consumeInitialShareAndQuickTile({
   required AppController controller,
+  required bool Function() isMounted,
   required void Function(String url) onSingleSharedUrl,
   required void Function(List<String> urls) onMultipleSharedUrls,
-}) {
+}) async {
   final pending = controller.consumePendingSharedUrls();
-  if (pending.length == 1) {
-    onSingleSharedUrl(pending.first);
-  } else if (pending.length > 1) {
-    onMultipleSharedUrls(pending);
+  if (pending.isNotEmpty) {
+    if (pending.length == 1) {
+      onSingleSharedUrl(pending.first);
+    } else {
+      onMultipleSharedUrls(pending);
+    }
+    return;
   }
+  await controller.requestNotificationPermissionOnce();
+  if (!isMounted()) return;
   if (controller.autoInitNative &&
       controller.settings.quickTileEnabled &&
       !controller.settings.quickTilePrompted) {
-    unawaited(controller.promptAddQuickTileOnce());
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!isMounted()) return;
+    await controller.promptAddQuickTileOnce();
   }
 }
 

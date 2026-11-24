@@ -7,6 +7,7 @@ import 'package:faqih_downloader_mobile/core/config/app_settings.dart';
 import 'package:faqih_downloader_mobile/core/config/settings_repository.dart';
 import 'package:faqih_downloader_mobile/core/i18n/translator.dart';
 import 'package:faqih_downloader_mobile/features/settings/settings_screen.dart';
+import 'package:faqih_downloader_mobile/features/settings/settings_sniffer_section.dart';
 import 'package:faqih_downloader_mobile/platform/background_capture_channel.dart';
 import 'package:faqih_downloader_mobile/platform/channel_names.dart';
 import 'package:faqih_downloader_mobile/platform/foreground_service_channel.dart';
@@ -364,5 +365,198 @@ void main() {
     expect(lastSyncedAutoSniffer, isTrue);
 
     controller.dispose();
+  });
+
+  testWidgets('cold-start share skips Quick Tile prompt and promptAddQuickTileOnce only marks prompted on true', (tester) async {
+    var pendingShare = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    var quickTileCalls = 0;
+    var promptReturn = false;
+    var capturedEmptyClipboardMsg = '';
+
+    messenger.setMockMethodCallHandler(shareMethod, (call) async {
+      if (call.method == 'consumeInitialSharedText') {
+        final out = pendingShare;
+        pendingShare = '';
+        return out;
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(ytdlMethod, (call) async {
+      if (call.method == 'initialize') {
+        return <String, Object?>{'initialized': true, 'ytdlpVersion': '2026.01.01', 'ffmpegReady': true};
+      }
+      if (call.method == 'extractInfo') {
+        return jsonEncode(<String, dynamic>{
+          'id': 'dQw4w9WgXcQ',
+          'title': 'Share Suppress Tile Video',
+          'duration': 45,
+          'formats': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'format_id': '22',
+              'url': 'https://cdn.example.com/v.mp4',
+              'ext': 'mp4',
+              'vcodec': 'avc1',
+              'acodec': 'mp4a',
+              'height': 720,
+            },
+          ],
+        });
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(bgMethod, (call) async {
+      if (call.method == 'requestAddQuickTile') {
+        quickTileCalls++;
+        return promptReturn;
+      }
+      if (call.method == 'setAutoSnifferConfig') {
+        capturedEmptyClipboardMsg = (call.arguments as Map)['emptyClipboardMsg']?.toString() ?? '';
+        return true;
+      }
+      return true;
+    });
+
+    late SettingsRepository repo;
+    late AppTranslator translator;
+    late AppController controller;
+    await tester.runAsync(() async {
+      repo = await SettingsRepository.create();
+      translator = AppTranslator(initialLanguage: 'en', repository: repo);
+      controller = AppController(
+        translator: translator,
+        settingsRepository: repo,
+        historyManager: DownloadHistoryManager(
+          storage: HistoryStorage(p.join(tempDir.path, 'hist_suppress.json')),
+        ),
+        youtubeDlChannel: YoutubeDlChannel(methodChannel: ytdlMethod, eventChannel: ytdlEvents),
+        shareIntentChannel: ShareIntentChannel(methodChannel: shareMethod, eventChannel: shareEvents),
+        mediaStoreChannel: MediaStoreChannel(methodChannel: mediaMethod),
+        foregroundServiceChannel: ForegroundServiceChannel(methodChannel: fgMethod, eventChannel: fgEvents),
+        backgroundCaptureChannel: BackgroundCaptureChannel(methodChannel: bgMethod),
+        autoInitNative: true,
+      );
+      await controller.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+
+    await tester.pumpWidget(FaqihDownloaderApp(translator: translator, controller: controller));
+    await tester.pump(const Duration(milliseconds: 450));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Share Suppress Tile Video'), findsOneWidget);
+    expect(quickTileCalls, 0);
+    expect(controller.settings.quickTilePrompted, isFalse);
+    expect(capturedEmptyClipboardMsg, isNotEmpty);
+
+    // If native requestAddQuickTile returns false, quickTilePrompted must NOT be persisted as true:
+    final failedPrompt = await controller.promptAddQuickTileOnce();
+    expect(failedPrompt, isFalse);
+    expect(controller.settings.quickTilePrompted, isFalse);
+
+    // Once native returns true, quickTilePrompted flips to true:
+    promptReturn = true;
+    final succeededPrompt = await controller.promptAddQuickTileOnce();
+    expect(succeededPrompt, isTrue);
+    expect(controller.settings.quickTilePrompted, isTrue);
+
+    controller.dispose();
+  });
+
+  testWidgets('normal cold start serializes requestNotificationPermission before requestAddQuickTile', (tester) async {
+    final callOrder = <String>[];
+    messenger.setMockMethodCallHandler(mediaMethod, (call) async {
+      if (call.method == 'getAppWorkDir') return tempDir.path;
+      if (call.method == 'requestNotificationPermission') {
+        callOrder.add('requestNotificationPermission');
+        return true;
+      }
+      return true;
+    });
+    messenger.setMockMethodCallHandler(ytdlMethod, (call) async {
+      if (call.method == 'initialize') {
+        return <String, Object?>{'initialized': true, 'ytdlpVersion': '2026.01.01', 'ffmpegReady': true};
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(bgMethod, (call) async {
+      if (call.method == 'requestAddQuickTile') {
+        callOrder.add('requestAddQuickTile');
+        return true;
+      }
+      return true;
+    });
+
+    late SettingsRepository repo;
+    late AppTranslator translator;
+    late AppController controller;
+    await tester.runAsync(() async {
+      repo = await SettingsRepository.create();
+      translator = AppTranslator(initialLanguage: 'en', repository: repo);
+      controller = AppController(
+        translator: translator,
+        settingsRepository: repo,
+        historyManager: DownloadHistoryManager(
+          storage: HistoryStorage(p.join(tempDir.path, 'hist_serial.json')),
+        ),
+        youtubeDlChannel: YoutubeDlChannel(methodChannel: ytdlMethod, eventChannel: ytdlEvents),
+        shareIntentChannel: ShareIntentChannel(methodChannel: shareMethod, eventChannel: shareEvents),
+        mediaStoreChannel: MediaStoreChannel(methodChannel: mediaMethod),
+        foregroundServiceChannel: ForegroundServiceChannel(methodChannel: fgMethod, eventChannel: fgEvents),
+        backgroundCaptureChannel: BackgroundCaptureChannel(methodChannel: bgMethod),
+        autoInitNative: true,
+      );
+      await controller.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+
+    await tester.pumpWidget(FaqihDownloaderApp(translator: translator, controller: controller));
+    await tester.pump();
+    // Before 350ms delay completes, notification permission ran first without Quick Tile:
+    expect(callOrder, <String>['requestNotificationPermission']);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    expect(callOrder, <String>['requestNotificationPermission', 'requestAddQuickTile']);
+    expect(controller.settings.quickTilePrompted, isTrue);
+
+    controller.dispose();
+  });
+
+  testWidgets('SettingsSnifferSection enables platform chips when only backgroundAutoSnifferEnabled is true', (tester) async {
+    AppSettings? updated;
+    late SettingsRepository repo;
+    await tester.runAsync(() async {
+      repo = await SettingsRepository.create();
+    });
+    final translator = AppTranslator(initialLanguage: 'en', repository: repo);
+    const settings = AppSettings(
+      clipboardSnifferActive: false,
+      backgroundAutoSnifferEnabled: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: SettingsSnifferSection(
+              translator: translator,
+              settings: settings,
+              onChanged: (next) => updated = next,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final tiktokChip = find.byKey(const Key('sniffer_plat_tiktok'));
+    await tester.ensureVisible(tiktokChip);
+    await tester.pumpAndSettle();
+    await tester.tap(tiktokChip);
+    await tester.pumpAndSettle();
+
+    expect(updated, isNotNull);
+    expect(updated!.snifferPlatforms['tiktok'], isFalse);
   });
 }

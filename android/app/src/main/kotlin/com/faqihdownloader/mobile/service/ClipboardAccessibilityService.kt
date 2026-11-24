@@ -17,7 +17,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     companion object {
         private const val COOLDOWN_MS = 1800L
         private const val TRIGGER_DELAY_MS = 180L
-        private val CLICK_KEYWORDS = listOf("copy", "نسخ", "رابط", "link")
+        private val CLICK_KEYWORDS = listOf("copy", "نسخ")
         private val TOAST_KEYWORDS = listOf("copied", "clipboard", "تم النسخ", "تم نسخ", "الحافظة")
     }
 

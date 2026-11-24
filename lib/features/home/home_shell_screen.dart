@@ -52,7 +52,6 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
     super.initState();
     final ctrl = widget.controller;
     if (ctrl != null) {
-      unawaited(ctrl.requestNotificationPermissionOnce());
       _shareSub = ctrl.sharedUrlBatchesStream.listen((urls) {
         if (!mounted || urls.isEmpty) return;
         if (urls.length > 1) {
@@ -67,10 +66,13 @@ class _HomeShellScreenState extends State<HomeShellScreen> {
       )..start(checkImmediately: true);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        consumeInitialShareAndQuickTile(
-          controller: ctrl,
-          onSingleSharedUrl: _openSharedSingleUrl,
-          onMultipleSharedUrls: _stageMultipleUrls,
+        unawaited(
+          consumeInitialShareAndQuickTile(
+            controller: ctrl,
+            isMounted: () => mounted,
+            onSingleSharedUrl: _openSharedSingleUrl,
+            onMultipleSharedUrls: _stageMultipleUrls,
+          ),
         );
       });
     }

@@ -371,7 +371,7 @@ class AppController extends ChangeNotifier {
   Future<bool> openAccessibilitySettings() => _captureHelper.openAccessibilitySettings();
   Future<bool> openAppDetailsSettings() => _captureHelper.openAppDetailsSettings();
   Future<bool> setQuickTileEnabled(bool enabled) => _captureHelper.setQuickTileEnabled(enabled);
-  Future<void> promptAddQuickTileOnce() => _captureHelper.promptAddQuickTileOnce();
+  Future<bool> promptAddQuickTileOnce() => _captureHelper.promptAddQuickTileOnce();
 
   String? _effectiveCookiesFile() {
     final path = _settings.cookiesFilePath.trim();

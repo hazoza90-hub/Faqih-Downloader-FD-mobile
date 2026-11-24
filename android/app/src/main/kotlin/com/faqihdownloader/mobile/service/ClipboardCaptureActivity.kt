@@ -15,6 +15,7 @@ import android.os.Looper
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.faqihdownloader.mobile.MainActivity
+import com.faqihdownloader.mobile.R
 
 /**
  * Transparent short-lived activity that gains brief focus so Android 10-15 allows
@@ -29,9 +30,12 @@ class ClipboardCaptureActivity : Activity() {
         const val KEY_AUTO_ENABLED = "auto_sniffer_enabled"
         const val KEY_NOTIF_TITLE = "notif_title"
         const val KEY_NOTIF_ACTION = "notif_action_label"
+        const val KEY_EMPTY_CLIPBOARD_MSG = "empty_clipboard_msg"
         const val KEY_LAST_SILENT_URL = "last_silent_url"
+        const val KEY_LAST_SILENT_TS = "last_silent_ts"
         const val SILENT_CHANNEL_ID = "fd_silent_capture_channel"
         const val SILENT_NOTIFICATION_ID = 4350
+        private const val DUPLICATE_WINDOW_MS = 15_000L
         private val URL_REGEX = Regex("https?://\\S+", RegexOption.IGNORE_CASE)
     }
 
@@ -84,8 +88,10 @@ class ClipboardCaptureActivity : Activity() {
             if (payload.isNotEmpty()) {
                 startActivity(buildLaunchIntent(payload))
             } else {
+                val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 val emptyMsg = intent.getStringExtra(EXTRA_EMPTY_CLIPBOARD_MSG)
                     ?.takeIf { it.isNotBlank() }
+                    ?: prefs.getString(KEY_EMPTY_CLIPBOARD_MSG, null)?.takeIf { it.isNotBlank() }
                     ?: "No valid URL found in clipboard"
                 Toast.makeText(applicationContext, emptyMsg, Toast.LENGTH_SHORT).show()
             }
@@ -102,9 +108,15 @@ class ClipboardCaptureActivity : Activity() {
 
     private fun handleSilentCapture(url: String) {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getString(KEY_LAST_SILENT_URL, "") == url) return
+        val lastUrl = prefs.getString(KEY_LAST_SILENT_URL, "")
+        val lastTs = prefs.getLong(KEY_LAST_SILENT_TS, 0L)
+        val now = System.currentTimeMillis()
+        if (lastUrl == url && (now - lastTs) < DUPLICATE_WINDOW_MS) return
         if (!isPlatformAllowed(url, prefs)) return
-        prefs.edit().putString(KEY_LAST_SILENT_URL, url).apply()
+        prefs.edit()
+            .putString(KEY_LAST_SILENT_URL, url)
+            .putLong(KEY_LAST_SILENT_TS, now)
+            .apply()
         postSilentNotification(url, prefs)
     }
 
@@ -149,7 +161,7 @@ class ClipboardCaptureActivity : Activity() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(this, SILENT_CHANNEL_ID)
-            .setSmallIcon(applicationInfo.icon)
+            .setSmallIcon(R.drawable.ic_qs_capture)
             .setContentTitle(title)
             .setContentText(url)
             .setStyle(NotificationCompat.BigTextStyle().bigText(url))

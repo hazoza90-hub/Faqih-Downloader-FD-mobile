@@ -104,7 +104,7 @@ class SettingsSnifferSection extends StatelessWidget {
                   key: Key('sniffer_plat_$plat'),
                   label: Text(tr('plat_$plat')),
                   selected: enabled,
-                  onSelected: settings.clipboardSnifferActive
+                  onSelected: (settings.clipboardSnifferActive || settings.backgroundAutoSnifferEnabled)
                       ? (v) {
                           final next = Map<String, bool>.from(settings.snifferPlatforms);
                           next[plat] = v;

@@ -98,6 +98,7 @@ class CaptureIntegrationsHelper {
         platforms: s.snifferPlatforms,
         notifTitle: _translator.tr('notif_silent_capture_title'),
         notifActionLabel: _translator.tr('notif_silent_capture_action'),
+        emptyClipboardMsg: _translator.tr('msg_capture_no_url'),
       );
     } catch (_) {}
   }
@@ -120,11 +121,16 @@ class CaptureIntegrationsHelper {
     return true;
   }
 
-  Future<void> promptAddQuickTileOnce() async {
+  Future<bool> promptAddQuickTileOnce() async {
     final s = _settingsProvider();
-    if (!s.quickTileEnabled || s.quickTilePrompted) return;
-    await _saveSettings(s.copyWith(quickTilePrompted: true));
-    await _background.requestAddQuickTile(label: _translator.tr('quick_tile_label'));
+    if (!s.quickTileEnabled || s.quickTilePrompted) return false;
+    final prompted = await _background.requestAddQuickTile(
+      label: _translator.tr('quick_tile_label'),
+    );
+    if (prompted) {
+      await _saveSettings(_settingsProvider().copyWith(quickTilePrompted: true));
+    }
+    return prompted;
   }
 
   Future<void> syncOnBoot() async {

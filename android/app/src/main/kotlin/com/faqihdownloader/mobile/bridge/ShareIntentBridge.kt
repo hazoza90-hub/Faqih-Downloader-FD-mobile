@@ -68,9 +68,6 @@ class ShareIntentBridge(
             mainHandler.post { sink.success(text) }
         } else {
             pendingWarmText = text
-            if (initialSharedText == null) {
-                initialSharedText = text
-            }
         }
     }
 
@@ -92,6 +89,9 @@ class ShareIntentBridge(
             "consumeInitialSharedText" -> {
                 val text = initialSharedText
                 initialSharedText = null
+                if (text != null && pendingWarmText == text) {
+                    pendingWarmText = null
+                }
                 result.success(text)
             }
             "moveTaskToBack" -> {
@@ -123,10 +123,18 @@ class ShareIntentBridge(
 
         val clipText = runCatching {
             val clip = intent.clipData
-            if (clip != null && clip.itemCount > 0) {
-                clip.getItemAt(0).coerceToText(appContext)?.toString()?.trim()
+            if (clip != null) {
+                var found: String? = null
+                for (i in 0 until clip.itemCount) {
+                    val candidate = clip.getItemAt(i)?.coerceToText(appContext)?.toString()?.trim()
+                    if (!candidate.isNullOrEmpty() && URL_REGEX.containsMatchIn(candidate)) {
+                        found = candidate
+                        break
+                    }
+                }
+                found
             } else null
         }.getOrNull()
-        return if (!clipText.isNullOrEmpty() && URL_REGEX.containsMatchIn(clipText)) clipText else null
+        return clipText
     }
 }

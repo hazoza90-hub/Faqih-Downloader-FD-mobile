@@ -38,6 +38,7 @@ class BackgroundCaptureChannel {
     required Map<String, bool> platforms,
     required String notifTitle,
     required String notifActionLabel,
+    String emptyClipboardMsg = '',
   }) async {
     final res = await _method.invokeMethod<bool>(
       'setAutoSnifferConfig',
@@ -46,6 +47,7 @@ class BackgroundCaptureChannel {
         'platforms': platforms,
         'notifTitle': notifTitle,
         'notifActionLabel': notifActionLabel,
+        'emptyClipboardMsg': emptyClipboardMsg,
       },
     );
     return res ?? false;
