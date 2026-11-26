@@ -24,6 +24,7 @@ class _NullInnerTubeExtractor extends YouTubeInnerTubeExtractor {
   Future<YouTubeStreamInfo?> extract(
     String url, {
     void Function(void Function() aborter)? onRegisterAbort,
+    int startProfileIndex = 0,
   }) async {
     calls++;
     return null;

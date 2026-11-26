@@ -176,6 +176,7 @@ const Map<String, String> stringsEn = <String, String>{
   'btn_share': 'Share',
   'btn_copy_path': 'Copy Path',
   'msg_path_copied': 'File path copied.',
+  'msg_error_copied': 'Error message copied',
   'msg_share_failed': 'Could not share file: {err}',
   'dlg_delete_title': 'Delete Download',
   'dlg_delete_body': 'Choose how to delete "{name}":',

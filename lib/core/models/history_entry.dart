@@ -19,6 +19,7 @@ class HistoryEntry {
     this.platform = 'Direct',
     this.resolution,
     this.contentUri,
+    this.errorMessage,
   });
 
   final String id;
@@ -34,6 +35,7 @@ class HistoryEntry {
   final String platform;
   final String? resolution;
   final String? contentUri;
+  final String? errorMessage;
 
   HistoryEntry copyWith({
     String? id,
@@ -52,6 +54,8 @@ class HistoryEntry {
     bool clearResolution = false,
     String? contentUri,
     bool clearContentUri = false,
+    String? errorMessage,
+    bool clearErrorMessage = false,
   }) {
     return HistoryEntry(
       id: id ?? this.id,
@@ -67,6 +71,7 @@ class HistoryEntry {
       platform: platform ?? this.platform,
       resolution: clearResolution ? null : (resolution ?? this.resolution),
       contentUri: clearContentUri ? null : (contentUri ?? this.contentUri),
+      errorMessage: clearErrorMessage ? null : (errorMessage ?? this.errorMessage),
     );
   }
 
@@ -85,6 +90,7 @@ class HistoryEntry {
       'platform': platform,
       'resolution': resolution,
       'content_uri': contentUri,
+      'errorMessage': errorMessage,
     };
   }
 
@@ -105,6 +111,7 @@ class HistoryEntry {
       platform: json['platform']?.toString() ?? 'Direct',
       resolution: json['resolution']?.toString(),
       contentUri: json['content_uri']?.toString(),
+      errorMessage: json['errorMessage']?.toString(),
     );
   }
 
@@ -138,7 +145,8 @@ class HistoryEntry {
         other.completedAt == completedAt &&
         other.platform == platform &&
         other.resolution == resolution &&
-        other.contentUri == contentUri;
+        other.contentUri == contentUri &&
+        other.errorMessage == errorMessage;
   }
 
   @override
@@ -156,5 +164,6 @@ class HistoryEntry {
     platform,
     resolution,
     contentUri,
+    errorMessage,
   );
 }

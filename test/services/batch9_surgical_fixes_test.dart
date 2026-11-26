@@ -206,7 +206,7 @@ void main() {
       expect(outPath, endsWith('ytdlp_ok.mp4'));
       expect(File(p.join(jobDir, 'ytdlp_stale.part')).existsSync(), isFalse);
       expect(attempts, <String>[
-        'DEFAULT|NO_COOKIE',
+        'youtube:player_client=android_vr|NO_COOKIE',
         'youtube:player_client=ios,mweb|NO_COOKIE',
         '|NO_COOKIE',
         'youtube:player_client=mweb,web|/tmp/cookies.txt',

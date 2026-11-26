@@ -1,20 +1,18 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
 import '../../core/models/audio_track.dart';
 import '../../core/models/download_status.dart';
 import '../../core/models/video_format_option.dart';
-import '../../core/models/youtube_stream_info.dart';
 import '../../core/utils/url_detector.dart';
 import '../../engine/engine_callbacks.dart';
-import '../../engine/http_client_factory.dart';
 import '../../engine/isolate_download_runner.dart';
 import '../../platform/youtube_dl_channel.dart';
 import '../media/media_exceptions.dart';
 import '../media/youtube_innertube_extractor.dart';
 import 'download_job_models.dart';
+import 'media_stream_helpers.dart';
 import 'ytdlp_stream_downloader.dart';
 
 typedef DownloadRunnerFactory = IsolateDownloadRunner Function({
@@ -147,7 +145,7 @@ class MediaStreamAcquirer {
       }
       final picked = fast == null
           ? null
-          : _pickInnerTubeFormat(fast, request.preferredVideoHeight);
+          : MediaStreamHelpers.pickInnerTubeFormat(fast, request.preferredVideoHeight);
       if (picked != null) {
         fmt = picked;
         audio ??= picked.selectedAudioTrack ?? fast!.selectedAudioTrack;
@@ -174,7 +172,25 @@ class MediaStreamAcquirer {
             err.kind == MediaErrorKind.cancelled) {
           rethrow;
         }
-        _cleanupTurboArtifacts(jobDir);
+        MediaStreamHelpers.cleanupTurboArtifacts(jobDir);
+        if (err is TurboExpiredException &&
+            UrlDetector.extractYouTubeId(request.url) != null &&
+            !request.url.toLowerCase().contains('/playlist?')) {
+          final rotated = await _retryTurboWithBackupProfile(
+            request: request,
+            jobDir: jobDir,
+            originalFmt: fmt,
+            originalAudio: audio,
+            speedLimitBytesPerSec: speedLimitBytesPerSec,
+            isCancelled: isCancelled,
+            isPaused: isPaused,
+            setActiveRunner: setActiveRunner,
+            setActivePhase: setActivePhase,
+            onTurboProgress: onTurboProgress,
+          );
+          if (rotated != null) return rotated;
+          MediaStreamHelpers.cleanupTurboArtifacts(jobDir);
+        }
       }
     }
 
@@ -189,6 +205,66 @@ class MediaStreamAcquirer {
       onProgress: onYtDlpProgress,
     );
     return AcquiredMediaFiles(videoPath: path);
+  }
+
+  Future<AcquiredMediaFiles?> _retryTurboWithBackupProfile({
+    required DownloadJobRequest request,
+    required String jobDir,
+    required VideoFormatOption? originalFmt,
+    required AudioTrack? originalAudio,
+    required double speedLimitBytesPerSec,
+    required bool Function() isCancelled,
+    required bool Function() isPaused,
+    required void Function(IsolateDownloadRunner? runner) setActiveRunner,
+    required void Function(DownloadPhase phase) setActivePhase,
+    required void Function(DownloadPhase phase, EngineProgressSnapshot snap)
+        onTurboProgress,
+  }) async {
+    final backupInfo = await _innerTube.extract(request.url, startProfileIndex: 1);
+    if (isCancelled()) {
+      throw const MediaExtractionException(
+        kind: MediaErrorKind.cancelled,
+        message: 'Download cancelled',
+      );
+    }
+    if (backupInfo == null) return null;
+    final targetHeight = (originalFmt?.height ?? 0) > 0
+        ? originalFmt!.height
+        : request.preferredVideoHeight;
+    final altFmt = request.audioOnly
+        ? null
+        : MediaStreamHelpers.pickInnerTubeFormat(backupInfo, targetHeight);
+    final wantsAudio = request.audioOnly ||
+        (altFmt?.needsAudioMerge ?? false) ||
+        (originalAudio != null && !originalAudio.isOriginal);
+    final altAudio = MediaStreamHelpers.matchAudioTrack(
+      backupInfo,
+      preferredAudio: originalAudio,
+      pickedVideo: altFmt,
+      wantsAudio: wantsAudio,
+    );
+    if (!canTryTurbo(request, altFmt, altAudio)) return null;
+    try {
+      return await _downloadDirectStreams(
+        request: request,
+        jobDir: jobDir,
+        fmt: altFmt,
+        audio: altAudio,
+        speedLimitBytesPerSec: speedLimitBytesPerSec,
+        isCancelled: isCancelled,
+        isPaused: isPaused,
+        setActiveRunner: setActiveRunner,
+        setActivePhase: setActivePhase,
+        onTurboProgress: onTurboProgress,
+      );
+    } catch (err) {
+      if (isCancelled()) rethrow;
+      if (err is MediaExtractionException &&
+          err.kind == MediaErrorKind.cancelled) {
+        rethrow;
+      }
+      return null;
+    }
   }
 
   Future<AcquiredMediaFiles> _downloadDirectStreams({
@@ -214,7 +290,7 @@ class MediaStreamAcquirer {
       await runTurboTransfer(
         url: audioUrl,
         destinationPath: audioPath,
-        headers: _mergeStreamHeaders(
+        headers: MediaStreamHelpers.mergeStreamHeaders(
           audioUrl,
           {...request.headers, ...?audio?.httpHeaders},
           request.cookiesFile,
@@ -236,7 +312,7 @@ class MediaStreamAcquirer {
     await runTurboTransfer(
       url: fmt.videoUrl,
       destinationPath: vPath,
-      headers: _mergeStreamHeaders(
+      headers: MediaStreamHelpers.mergeStreamHeaders(
         fmt.videoUrl,
         {...request.headers, ...fmt.videoHeaders},
         request.cookiesFile,
@@ -261,7 +337,7 @@ class MediaStreamAcquirer {
       await runTurboTransfer(
         url: aUrl,
         destinationPath: aPath,
-        headers: _mergeStreamHeaders(
+        headers: MediaStreamHelpers.mergeStreamHeaders(
           aUrl,
           {...request.headers, ...fmt.audioHeaders, ...?audio?.httpHeaders},
           request.cookiesFile,
@@ -278,96 +354,13 @@ class MediaStreamAcquirer {
     return AcquiredMediaFiles(videoPath: vPath, audioPath: aPath);
   }
 
-  static Map<String, String> _mergeStreamHeaders(
-    String url,
-    Map<String, String> rawHeaders,
-    String? cookiesFile,
-  ) {
-    final hasCookie = rawHeaders.entries.any(
-      (e) => e.key.toLowerCase() == 'cookie' && e.value.trim().isNotEmpty,
-    );
-    if (hasCookie) return rawHeaders;
-    final cookieStr = HttpClientFactory.extractNetscapeCookieHeader(
-      cookiesFile,
-      url,
-    );
-    if (cookieStr.isEmpty) return rawHeaders;
-    return HttpClientFactory.withCookieHeader(rawHeaders, cookieStr);
-  }
-
-  static void _cleanupTurboArtifacts(String jobDir) {
-    try {
-      final dir = Directory(jobDir);
-      if (!dir.existsSync()) return;
-      for (final entity in dir.listSync()) {
-        final name = p.basename(entity.path);
-        if (name.startsWith('raw_video.') ||
-            name.startsWith('raw_audio.') ||
-            name.endsWith('.sd_parts') ||
-            name.contains('.part')) {
-          try {
-            entity.deleteSync(recursive: true);
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-  }
-
-  static VideoFormatOption? _pickInnerTubeFormat(
-    YouTubeStreamInfo info,
-    int preferredHeight,
-  ) {
-    final direct = info.videoFormats
-        .where((f) => f.isDirectTurboSupported && !isManifestUrl(f.videoUrl, protocol: f.protocol))
-        .toList(growable: false);
-    if (direct.isEmpty) return null;
-    if (preferredHeight > 0) {
-      for (final f in direct) {
-        if (f.height > 0 && f.height <= preferredHeight) return f;
-      }
-    }
-    return direct.first;
-  }
-
   static bool canTryTurbo(
     DownloadJobRequest request,
     VideoFormatOption? fmt,
     AudioTrack? audio,
-  ) {
-    if (request.audioOnly) {
-      if (fmt != null && fmt.isHlsOrDash) return false;
-      final url = audio?.url ?? fmt?.audioUrl ?? fmt?.videoUrl ?? '';
-      final ext = (audio?.ext ?? fmt?.audioExt ?? '').trim().toLowerCase();
-      if (ext == 'm3u8' || ext == 'mpd') return false;
-      return url.isNotEmpty &&
-          !isManifestUrl(url, protocol: fmt?.protocol ?? '');
-    }
-    if (fmt == null || !fmt.isDirectTurboSupported) return false;
-    if (isManifestUrl(fmt.videoUrl, protocol: fmt.protocol)) return false;
-    final wantsSeparateAudio =
-        fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
-    if (wantsSeparateAudio) {
-      final aUrl =
-          (audio?.url.isNotEmpty ?? false) ? audio!.url : (fmt.audioUrl ?? '');
-      final aExt = (audio?.ext ?? fmt.audioExt).trim().toLowerCase();
-      if (aExt == 'm3u8' || aExt == 'mpd') return false;
-      if (aUrl.isNotEmpty && isManifestUrl(aUrl, protocol: fmt.protocol)) {
-        return false;
-      }
-    }
-    return true;
-  }
+  ) =>
+      MediaStreamHelpers.canTryTurbo(request, fmt, audio);
 
-  static bool isManifestUrl(String url, {String protocol = ''}) {
-    final pLower = protocol.toLowerCase();
-    final u = url.toLowerCase();
-    return pLower.contains('m3u8') ||
-        pLower.contains('hls') ||
-        pLower.contains('dash') ||
-        pLower.contains('f4m') ||
-        u.contains('.m3u8') ||
-        u.contains('.mpd') ||
-        u.contains('/manifest/hls') ||
-        u.contains('/manifest/dash');
-  }
+  static bool isManifestUrl(String url, {String protocol = ''}) =>
+      MediaStreamHelpers.isManifestUrl(url, protocol: protocol);
 }

@@ -60,6 +60,16 @@ class _VaultTabState extends State<VaultTab> {
     );
   }
 
+  Future<void> _copyError(HistoryEntry entry) async {
+    final msg = entry.errorMessage?.trim() ?? '';
+    if (msg.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: msg));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.translator.tr('msg_error_copied'))),
+    );
+  }
+
   Future<void> _confirmDelete(HistoryEntry entry) async {
     final tr = widget.translator.tr;
     final choice = await showDialog<String>(
@@ -209,6 +219,31 @@ class _VaultTabState extends State<VaultTab> {
                           ),
                         ],
                       ),
+                      if (!ok && (entry.errorMessage?.trim().isNotEmpty ?? false)) ...<Widget>[
+                        const SizedBox(height: 4),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                entry.errorMessage!,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11, color: AppColors.danger),
+                              ),
+                            ),
+                            IconButton(
+                              key: Key('vault_copy_error_${entry.id}'),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              tooltip: tr('btn_copy'),
+                              onPressed: () => unawaited(_copyError(entry)),
+                              icon: const Icon(Icons.copy_rounded, size: 16, color: AppColors.danger),
+                            ),
+                          ],
+                        ),
+                      ],
                       if (entry.filePath.isNotEmpty) ...<Widget>[
                         const SizedBox(height: 4),
                         Text(

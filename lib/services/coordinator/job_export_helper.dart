@@ -89,6 +89,7 @@ abstract final class CoordinatorHelpers {
         platform: request.platform,
         resolution: state.resolution,
         contentUri: contentUri ?? state.exportedUri,
+        errorMessage: state.errorMessage,
       ),
     );
   }

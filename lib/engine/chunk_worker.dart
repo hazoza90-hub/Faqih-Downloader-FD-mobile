@@ -109,6 +109,7 @@ class ChunkWorker {
           updateChunk((c) => c.copyWith(status: ChunkStatus.completed));
           break;
         }
+        final beforeByte = chunk.currentByte;
         try {
           await _streamOnce(
             httpClient: httpClient,
@@ -132,6 +133,9 @@ class ChunkWorker {
           if (chunk.endByte == -1 || chunk.currentByte > chunk.endByte) {
             updateChunk((c) => c.copyWith(status: ChunkStatus.completed));
             break;
+          }
+          if (supportsRanges && chunk.endByte >= 0 && chunk.currentByte <= beforeByte) {
+            throw const HttpException('Empty response during ranged chunk transfer');
           }
           if (!(supportsRanges && chunk.endByte >= 0)) {
             throw HttpException(

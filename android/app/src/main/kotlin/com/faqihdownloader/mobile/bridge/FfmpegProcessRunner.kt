@@ -92,9 +92,9 @@ class FfmpegProcessRunner(private val appContext: Context) {
     private fun resolveFfmpegBinary(): File {
         val nativeDir = File(appContext.applicationInfo.nativeLibraryDir)
         val candidates = listOf(
+            File(nativeDir, "libffmpeg.so"),
             File(appContext.noBackupFilesDir, "youtubedl-android/packages/ffmpeg/usr/bin/ffmpeg"),
             File(appContext.noBackupFilesDir, "youtubedl-android/packages/ffmpeg/bin/ffmpeg"),
-            File(nativeDir, "libffmpeg.so"),
         )
         for (candidate in candidates) {
             if (isElfExecutable(candidate)) {

@@ -176,6 +176,7 @@ const Map<String, String> stringsAr = <String, String>{
   'btn_share': 'مشاركة',
   'btn_copy_path': 'نسخ المسار',
   'msg_path_copied': 'تم نسخ مسار الملف.',
+  'msg_error_copied': 'تم نسخ رسالة الخطأ',
   'msg_share_failed': 'تعذّرت مشاركة الملف: {err}',
   'dlg_delete_title': 'حذف التنزيل',
   'dlg_delete_body': 'اختر ما تريد حذفه للملف «{name}»:',

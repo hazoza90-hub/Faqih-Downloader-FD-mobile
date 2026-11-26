@@ -325,7 +325,7 @@ void main() {
       expect(out, endsWith('ytdlp_final.mp4'));
       expect(seen.length, 4);
       expect(seen.map((e) => e.extArgs).toList(), <Object?>[
-        null,
+        'youtube:player_client=android_vr',
         'youtube:player_client=ios,mweb',
         '',
         'youtube:player_client=mweb,web',

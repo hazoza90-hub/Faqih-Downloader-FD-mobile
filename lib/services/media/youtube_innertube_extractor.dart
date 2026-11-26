@@ -37,7 +37,7 @@ class YouTubeInnerTubeExtractor {
       Uri.parse('https://www.youtube.com/youtubei/v1/player?prettyPrint=false');
 
   static const String androidVrUserAgent =
-      'com.google.android.apps.youtube.vr.oculus/1.65.10 '
+      'com.google.android.apps.youtube.vr.oculus/1.61.48 '
       '(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
 
   static const String iosUserAgent =
@@ -46,11 +46,11 @@ class YouTubeInnerTubeExtractor {
   static const List<_InnerTubeProfile> _profiles = <_InnerTubeProfile>[
     _InnerTubeProfile(
       clientId: '28',
-      clientVersion: '1.65.10',
+      clientVersion: '1.61.48',
       userAgent: androidVrUserAgent,
       clientBody: <String, Object?>{
         'clientName': 'ANDROID_VR',
-        'clientVersion': '1.65.10',
+        'clientVersion': '1.61.48',
         'deviceMake': 'Oculus',
         'deviceModel': 'Quest 3',
         'osName': 'Android',
@@ -86,7 +86,9 @@ class YouTubeInnerTubeExtractor {
   Future<YouTubeStreamInfo?> extract(
     String url, {
     void Function(void Function() aborter)? onRegisterAbort,
+    int startProfileIndex = 0,
   }) async {
+    if (startProfileIndex >= _profiles.length) return null;
     final cleanUrl = url.trim();
     if (cleanUrl.toLowerCase().contains('/playlist?')) return null;
     final videoId = UrlDetector.extractYouTubeId(cleanUrl);
@@ -99,7 +101,9 @@ class YouTubeInnerTubeExtractor {
       activeClient?.close(force: true);
     });
 
-    for (final profile in _profiles) {
+    final startIdx = startProfileIndex < 0 ? 0 : startProfileIndex;
+    for (var i = startIdx; i < _profiles.length; i++) {
+      final profile = _profiles[i];
       if (aborted) return null;
       HttpClient? client;
       try {
