@@ -160,6 +160,7 @@ class YtDlpStreamDownloader {
         ? (audioOption?.filesize ?? formatOption?.audioSize ?? 0)
         : (formatOption?.filesizeApprox ?? 0) + (formatOption?.audioSize ?? 0);
     var lastDownloadedBytes = 0;
+    var lastProgress = 0.0;
     var lastSampleAt = DateTime.now();
     onProgress(phase, 0.0, -1.0, 0, lastTotalBytes, 0.0);
 
@@ -169,13 +170,22 @@ class YtDlpStreamDownloader {
           .where((e) => e.processId == pid && e.type == 'progress')
           .listen((ev) {
         if (isCancelled()) return;
-        final fallbackRatio = (ev.progress / 100.0).clamp(0.0, 1.0);
+        final hasMetrics = _pctRegex.hasMatch(ev.line) ||
+            _unknownDlRegex.hasMatch(ev.line) ||
+            _speedRegex.hasMatch(ev.line);
+        if (ev.progress < 0 && (!ev.line.contains('[download]') || !hasMetrics)) {
+          return;
+        }
+        final fallbackRatio = ev.progress >= 0
+            ? (ev.progress / 100.0).clamp(0.0, 1.0)
+            : lastProgress;
         final sample = parseProgressLine(
           ev.line,
           fallbackRatio: fallbackRatio,
           fallbackEta: ev.etaSeconds.toDouble(),
           lastTotalBytes: lastTotalBytes,
         );
+        lastProgress = sample.progress;
         if (sample.totalBytes > 0) lastTotalBytes = sample.totalBytes;
         var speed = sample.speedBytesPerSec;
         final now = DateTime.now();
@@ -228,6 +238,9 @@ class YtDlpStreamDownloader {
           );
         }
         _cleanupAttemptFiles(jobDir);
+        lastDownloadedBytes = 0;
+        lastProgress = 0.0;
+        lastSampleAt = DateTime.now();
         final attemptCookie = attempt.cookie;
         final opts = <String, Object?>{
           '-f': formatSpec,

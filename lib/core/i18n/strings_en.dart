@@ -13,6 +13,7 @@ const Map<String, String> stringsEn = <String, String>{
   'empty_vault_subtitle': 'Finished files sorted by category will appear here.',
   'url_input_hint': 'Enter or paste download URL...',
   'btn_paste': 'Paste',
+  'btn_copy': 'Copy',
   'btn_add': 'Add URL',
   'btn_analyze': 'Analyze & Download',
   'btn_start': 'Start Download',

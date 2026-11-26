@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:faqih_downloader_mobile/core/i18n/strings_ar.dart';
+import 'package:faqih_downloader_mobile/core/i18n/strings_en.dart';
 import 'package:faqih_downloader_mobile/core/i18n/translator.dart';
 import 'package:faqih_downloader_mobile/core/models/download_status.dart';
 import 'package:faqih_downloader_mobile/core/models/video_format_option.dart';
@@ -398,6 +400,80 @@ void main() {
       await tester.tap(copyBtn);
       await tester.pump();
       expect(copiedText, 'yt-dlp failed: HTTP Error 403: Forbidden');
+    });
+
+    test('7) ignores non-download negative progress log lines and verifies btn_copy AR/EN i18n', () async {
+      expect(stringsAr['btn_copy'], 'نسخ');
+      expect(stringsEn['btn_copy'], 'Copy');
+      expect(stringsAr.keys.toSet(), stringsEn.keys.toSet());
+
+      final jobDir = p.join(tempDir.path, 'neg_log_job');
+      await Directory(jobDir).create(recursive: true);
+
+      messenger.setMockMethodCallHandler(ytdlMethod, (call) async {
+        if (call.method == 'downloadMedia') {
+          final args = Map<Object?, Object?>.from(call.arguments as Map);
+          final pid = args['processId'].toString();
+          for (final payload in <Map<String, Object?>>[
+            <String, Object?>{
+              'type': 'progress',
+              'processId': pid,
+              'progress': 40.0,
+              'etaSeconds': 10,
+              'line': '[download]  40.0% of   40.00MiB at    2.50MiB/s ETA 00:10',
+            },
+            <String, Object?>{
+              'type': 'progress',
+              'processId': pid,
+              'progress': -1.0,
+              'etaSeconds': -1,
+              'line': '[Merger] Merging formats into "ytdlp_out.mp4"',
+            },
+            <String, Object?>{
+              'type': 'progress',
+              'processId': pid,
+              'progress': -1.0,
+              'etaSeconds': -1,
+              'line': '[download] Destination: ytdlp_out.mp4',
+            },
+          ]) {
+            await messenger.handlePlatformMessage(
+              ChannelNames.youtubeDlEvents,
+              const StandardMethodCodec().encodeSuccessEnvelope(payload),
+              (_) {},
+            );
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await File(p.join(jobDir, 'ytdlp_out.mp4')).writeAsBytes(<int>[1, 2, 3]);
+          return <String, Object?>{'exitCode': 0, 'stdout': 'ok', 'stderr': ''};
+        }
+        return null;
+      });
+
+      final samples = <({double progress, double speed, int dl})>[];
+      final dl = YtDlpStreamDownloader(
+        YoutubeDlChannel(methodChannel: ytdlMethod, eventChannel: ytdlEvents),
+      );
+      await dl.download(
+        request: const DownloadJobRequest(
+          id: 'neg_log_1',
+          url: 'https://www.instagram.com/reel/neg1/',
+          title: 'Neg Log',
+        ),
+        jobDir: jobDir,
+        formatOption: null,
+        audioOption: null,
+        isCancelled: () => false,
+        setActiveProcessId: (_) {},
+        setActivePhase: (_) {},
+        onProgress: (_, p, _, dlBytes, _, spd) {
+          samples.add((progress: p, speed: spd, dl: dlBytes));
+        },
+      );
+
+      expect(samples.length, 2); // initial 0.0 + real 40% progress only
+      expect(samples.last.progress, closeTo(0.4, 0.001));
+      expect(samples.last.speed, closeTo(2.5 * 1024 * 1024, 1024));
     });
   });
 }

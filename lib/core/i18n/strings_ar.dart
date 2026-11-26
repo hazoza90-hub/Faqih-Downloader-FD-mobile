@@ -13,6 +13,7 @@ const Map<String, String> stringsAr = <String, String>{
   'empty_vault_subtitle': 'ستظهر الملفات المكتملة مصنفة وجاهزة للفتح هنا.',
   'url_input_hint': 'أدخل أو الصق رابط التحميل هنا...',
   'btn_paste': 'لصق',
+  'btn_copy': 'نسخ',
   'btn_add': 'إضافة رابط',
   'btn_analyze': 'تحليل وتحميل',
   'btn_start': 'بدء التحميل',
