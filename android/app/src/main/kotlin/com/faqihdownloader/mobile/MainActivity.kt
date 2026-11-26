@@ -24,7 +24,10 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
-        youtubeDlBridge = YoutubeDlBridge(applicationContext).apply { attach(messenger) }
+        youtubeDlBridge = YoutubeDlBridge(applicationContext).apply {
+            attach(messenger)
+            prewarmAsync()
+        }
         foregroundServiceBridge = ForegroundServiceBridge(applicationContext).apply { attach(messenger) }
         shareIntentBridge = ShareIntentBridge(applicationContext) { this }.apply {
             attach(messenger)

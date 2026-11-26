@@ -353,6 +353,7 @@ class TurboDownloadEngine {
   }
 
   bool _shouldFallbackToSingleStream() {
+    if (_fatalLinkExpired && ChunkWorker.isGoogleVideoUrl(_resolvedUrl)) return false;
     final msg = _fatalError.toString().toLowerCase();
     return _chunks.length > 1 ||
         msg.contains('ignored range') ||

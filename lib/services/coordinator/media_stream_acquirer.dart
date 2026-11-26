@@ -122,8 +122,14 @@ class MediaStreamAcquirer {
     required void Function(DownloadPhase phase) setActivePhase,
     required void Function(DownloadPhase phase, EngineProgressSnapshot snap)
         onTurboProgress,
-    required void Function(DownloadPhase phase, double progress, double eta)
-        onYtDlpProgress,
+    required void Function(
+      DownloadPhase phase,
+      double progress,
+      double eta,
+      int downloadedBytes,
+      int totalBytes,
+      double speedBytesPerSec,
+    ) onYtDlpProgress,
   }) async {
     var fmt = request.selectedVideoFormat;
     var audio = request.selectedAudioTrack ?? fmt?.selectedAudioTrack;

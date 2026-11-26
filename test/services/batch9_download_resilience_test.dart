@@ -194,7 +194,7 @@ void main() {
         setActiveProcessId: (_) {},
         setActivePhase: (_) {},
         onTurboProgress: (_, _) {},
-        onYtDlpProgress: (_, _, _) {},
+        onYtDlpProgress: (_, _, _, _, _, _) {},
       );
 
       expect(dlCalled, 1);

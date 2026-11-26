@@ -110,6 +110,15 @@ class MediaExtractorService {
         }
       }
 
+      if (UrlDetector.isTikTokUrl(cleanUrl)) {
+        final fastTikTok = await _tiktokFallback.extract(cleanUrl);
+        _throwIfCancelled(effectiveId);
+        if (fastTikTok != null && _hasUsableStreams(fastTikTok)) {
+          _writeCache(cacheKey, fastTikTok);
+          return fastTikTok;
+        }
+      }
+
       final trimmedCookies = cookiesFile?.trim() ?? '';
       final firstPass = await _extractWithStrategies(
         cleanUrl: cleanUrl,
@@ -125,15 +134,6 @@ class MediaExtractorService {
         return firstPass.usable!;
       }
       _throwIfCancelled(effectiveId);
-
-      if (UrlDetector.isTikTokUrl(cleanUrl)) {
-        final fallback = await _tiktokFallback.extract(cleanUrl);
-        _throwIfCancelled(effectiveId);
-        if (fallback != null && _hasUsableStreams(fallback)) {
-          _writeCache(cacheKey, fallback);
-          return fallback;
-        }
-      }
 
       final skipAutoUpdate = !UrlDetector.isMediaUrl(cleanUrl) &&
           firstPass.lastError?.kind == MediaErrorKind.unsupportedUrl;

@@ -7,13 +7,27 @@ import '../../core/utils/url_detector.dart';
 import '../../engine/http_client_factory.dart';
 import 'format_ranker.dart';
 
-/// Fast pure-Dart YouTube InnerTube (`ANDROID_VR`) metadata & stream extractor.
+class _InnerTubeProfile {
+  const _InnerTubeProfile({
+    required this.clientId,
+    required this.clientVersion,
+    required this.userAgent,
+    required this.clientBody,
+  });
+
+  final String clientId;
+  final String clientVersion;
+  final String userAgent;
+  final Map<String, Object?> clientBody;
+}
+
+/// Fast pure-Dart YouTube InnerTube (`ANDROID_VR` + `IOS`) metadata & stream extractor.
 class YouTubeInnerTubeExtractor {
   YouTubeInnerTubeExtractor({
     FormatRanker ranker = const FormatRanker(),
     HttpClient Function()? httpClientFactory,
     Uri? endpoint,
-    Duration timeout = const Duration(seconds: 5),
+    Duration timeout = const Duration(milliseconds: 3500),
   })  : _ranker = ranker,
         _httpClientFactory = httpClientFactory,
         _endpoint = endpoint ?? _defaultEndpoint,
@@ -23,20 +37,45 @@ class YouTubeInnerTubeExtractor {
       Uri.parse('https://www.youtube.com/youtubei/v1/player?prettyPrint=false');
 
   static const String androidVrUserAgent =
-      'com.google.android.apps.youtube.vr.oculus/1.60.19 '
+      'com.google.android.apps.youtube.vr.oculus/1.65.10 '
       '(Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip';
 
-  static const Map<String, Object?> _vrClient = <String, Object?>{
-    'clientName': 'ANDROID_VR',
-    'clientVersion': '1.60.19',
-    'deviceMake': 'Oculus',
-    'deviceModel': 'Quest 3',
-    'osName': 'Android',
-    'osVersion': '12L',
-    'androidSdkVersion': 32,
-    'hl': 'en',
-    'gl': 'US',
-  };
+  static const String iosUserAgent =
+      'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_1 like Mac OS X;)';
+
+  static const List<_InnerTubeProfile> _profiles = <_InnerTubeProfile>[
+    _InnerTubeProfile(
+      clientId: '28',
+      clientVersion: '1.65.10',
+      userAgent: androidVrUserAgent,
+      clientBody: <String, Object?>{
+        'clientName': 'ANDROID_VR',
+        'clientVersion': '1.65.10',
+        'deviceMake': 'Oculus',
+        'deviceModel': 'Quest 3',
+        'osName': 'Android',
+        'osVersion': '12L',
+        'androidSdkVersion': 32,
+        'hl': 'en',
+        'gl': 'US',
+      },
+    ),
+    _InnerTubeProfile(
+      clientId: '5',
+      clientVersion: '20.10.4',
+      userAgent: iosUserAgent,
+      clientBody: <String, Object?>{
+        'clientName': 'IOS',
+        'clientVersion': '20.10.4',
+        'deviceMake': 'Apple',
+        'deviceModel': 'iPhone16,2',
+        'osName': 'iPhone',
+        'osVersion': '18.3.1.22D72',
+        'hl': 'en',
+        'gl': 'US',
+      },
+    ),
+  ];
 
   final FormatRanker _ranker;
   final HttpClient Function()? _httpClientFactory;
@@ -53,45 +92,56 @@ class YouTubeInnerTubeExtractor {
     final videoId = UrlDetector.extractYouTubeId(cleanUrl);
     if (videoId == null) return null;
 
-    HttpClient? client;
+    HttpClient? activeClient;
     var aborted = false;
     onRegisterAbort?.call(() {
       aborted = true;
-      client?.close(force: true);
+      activeClient?.close(force: true);
     });
-    try {
+
+    for (final profile in _profiles) {
       if (aborted) return null;
-      client = _httpClientFactory?.call() ??
-          HttpClientFactory.create(connectionTimeout: _timeout, idleTimeout: _timeout);
-      if (aborted) return null;
-      final req = await client.postUrl(_endpoint).timeout(_timeout);
-      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
-      req.headers.set(HttpHeaders.userAgentHeader, androidVrUserAgent);
-      req.headers.set('X-YouTube-Client-Name', '28');
-      req.headers.set('X-YouTube-Client-Version', '1.60.19');
-      req.write(jsonEncode(<String, dynamic>{
-        'videoId': videoId,
-        'contentCheckOk': true,
-        'racyCheckOk': true,
-        'context': const <String, Object?>{'client': _vrClient},
-      }));
-      final resp = await req.close().timeout(_timeout);
-      if (aborted || resp.statusCode != HttpStatus.ok) {
-        await resp.drain<void>().catchError((_) {});
-        return null;
+      HttpClient? client;
+      try {
+        client = _httpClientFactory?.call() ??
+            HttpClientFactory.create(connectionTimeout: _timeout, idleTimeout: _timeout);
+        activeClient = client;
+        if (aborted) return null;
+        final req = await client.postUrl(_endpoint).timeout(_timeout);
+        req.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
+        req.headers.set(HttpHeaders.userAgentHeader, profile.userAgent);
+        req.headers.set('X-YouTube-Client-Name', profile.clientId);
+        req.headers.set('X-YouTube-Client-Version', profile.clientVersion);
+        req.write(jsonEncode(<String, dynamic>{
+          'videoId': videoId,
+          'contentCheckOk': true,
+          'racyCheckOk': true,
+          'context': <String, Object?>{'client': profile.clientBody},
+        }));
+        final resp = await req.close().timeout(_timeout);
+        if (aborted || resp.statusCode != HttpStatus.ok) {
+          await resp.drain<void>().catchError((_) {});
+          if (aborted) return null;
+          continue;
+        }
+        final decoded = jsonDecode(await utf8.decodeStream(resp).timeout(_timeout));
+        if (aborted) return null;
+        if (decoded is! Map) continue;
+        final parsed = parsePlayerResponse(
+          Map<String, dynamic>.from(decoded),
+          videoId,
+          fallbackUrl: cleanUrl,
+          userAgent: profile.userAgent,
+        );
+        if (parsed != null) return parsed;
+      } catch (_) {
+        if (aborted) return null;
+      } finally {
+        if (identical(activeClient, client)) activeClient = null;
+        client?.close(force: true);
       }
-      final decoded = jsonDecode(await utf8.decodeStream(resp).timeout(_timeout));
-      if (aborted || decoded is! Map) return null;
-      return parsePlayerResponse(
-        Map<String, dynamic>.from(decoded),
-        videoId,
-        fallbackUrl: cleanUrl,
-      );
-    } catch (_) {
-      return null;
-    } finally {
-      client?.close(force: true);
     }
+    return null;
   }
 
   /// Parses a raw InnerTube `/youtubei/v1/player` JSON map into [YouTubeStreamInfo].
@@ -99,6 +149,7 @@ class YouTubeInnerTubeExtractor {
     Map<String, dynamic> data,
     String videoId, {
     String? fallbackUrl,
+    String userAgent = androidVrUserAgent,
   }) {
     final playability = data['playabilityStatus'];
     if (playability is! Map || playability['status']?.toString() != 'OK') {
@@ -125,7 +176,7 @@ class YouTubeInnerTubeExtractor {
       'thumbnail': _pickBestThumbnail(videoDetails['thumbnail']),
       'webpage_url': watchUrl,
       'extractor_key': 'Youtube',
-      'http_headers': const <String, String>{'User-Agent': androidVrUserAgent},
+      'http_headers': <String, String>{'User-Agent': userAgent},
       'formats': normalizedFormats,
       'subtitles': captions.manual,
       'automatic_captions': captions.auto,

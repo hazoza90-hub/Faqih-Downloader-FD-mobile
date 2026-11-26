@@ -200,7 +200,7 @@ void main() {
         isCancelled: () => false,
         setActiveProcessId: (_) {},
         setActivePhase: (_) {},
-        onProgress: (_, _, _) {},
+        onProgress: (_, _, _, _, _, _) {},
       );
 
       expect(outPath, endsWith('ytdlp_ok.mp4'));
@@ -244,7 +244,7 @@ void main() {
         isCancelled: () => false,
         setActiveProcessId: (_) {},
         setActivePhase: (_) {},
-        onProgress: (_, _, _) {},
+        onProgress: (_, _, _, _, _, _) {},
       );
       expect(igOut, endsWith('ytdlp_ig.mp4'));
       expect(attempts, <String>['/tmp/cookies.txt', 'NO_COOKIE']);

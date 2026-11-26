@@ -11,11 +11,127 @@ import '../../platform/youtube_dl_channel.dart';
 import '../media/media_exceptions.dart';
 import 'download_job_models.dart';
 
+/// Parsed sample from a single `yt-dlp` progress output line.
+class YtDlpProgressSample {
+  const YtDlpProgressSample({
+    required this.progress,
+    required this.downloadedBytes,
+    required this.totalBytes,
+    required this.speedBytesPerSec,
+    required this.etaSeconds,
+  });
+
+  final double progress;
+  final int downloadedBytes;
+  final int totalBytes;
+  final double speedBytesPerSec;
+  final double etaSeconds;
+}
+
 /// Fallback media stream downloader routed natively through `YoutubeDlChannel`.
 class YtDlpStreamDownloader {
   const YtDlpStreamDownloader(this._youtubeDl);
 
   final YoutubeDlChannel _youtubeDl;
+
+  static final RegExp _pctRegex = RegExp(r'(\d+(?:\.\d+)?)%');
+  static final RegExp _totalRegex = RegExp(
+    r'\bof\s+~?\s*([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)\b',
+    caseSensitive: false,
+  );
+  static final RegExp _unknownDlRegex = RegExp(
+    r'\[download\]\s+([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)\s+at\b',
+    caseSensitive: false,
+  );
+  static final RegExp _speedRegex = RegExp(
+    r'\bat\s+([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)/s',
+    caseSensitive: false,
+  );
+  static final RegExp _etaRegex = RegExp(r'\bETA\s+(?:(\d+):)?(\d+):(\d+)');
+
+  static double _parseByteUnit(String numStr, String unit) {
+    final val = double.tryParse(numStr) ?? 0.0;
+    switch (unit.toLowerCase()) {
+      case 'gib': return val * 1024 * 1024 * 1024;
+      case 'mib': return val * 1024 * 1024;
+      case 'kib': return val * 1024;
+      case 'gb': return val * 1000 * 1000 * 1000;
+      case 'mb': return val * 1000 * 1000;
+      case 'kb': return val * 1000;
+      default: return val;
+    }
+  }
+
+  static YtDlpProgressSample parseProgressLine(
+    String line, {
+    double fallbackRatio = 0.0,
+    double fallbackEta = -1.0,
+    int lastTotalBytes = 0,
+  }) {
+    final pctM = _pctRegex.firstMatch(line);
+    final ratio = pctM != null
+        ? ((double.tryParse(pctM.group(1)!) ?? 0.0) / 100.0).clamp(0.0, 1.0)
+        : fallbackRatio.clamp(0.0, 1.0);
+    final totalM = _totalRegex.firstMatch(line);
+    final parsedTotal = totalM != null
+        ? _parseByteUnit(totalM.group(1)!, totalM.group(2)!).round()
+        : 0;
+    final totalBytes = parsedTotal > 0 ? parsedTotal : lastTotalBytes;
+
+    var downloaded = 0;
+    final unknownM = _unknownDlRegex.firstMatch(line);
+    if (unknownM != null) {
+      downloaded = _parseByteUnit(unknownM.group(1)!, unknownM.group(2)!).round();
+    } else if (totalBytes > 0 && ratio > 0) {
+      downloaded = (totalBytes * ratio).round();
+    }
+
+    final speedM = _speedRegex.firstMatch(line);
+    final speed = speedM != null
+        ? _parseByteUnit(speedM.group(1)!, speedM.group(2)!)
+        : 0.0;
+
+    final etaM = _etaRegex.firstMatch(line);
+    var eta = fallbackEta;
+    if (etaM != null) {
+      final h = int.tryParse(etaM.group(1) ?? '0') ?? 0;
+      final m = int.tryParse(etaM.group(2) ?? '0') ?? 0;
+      final s = int.tryParse(etaM.group(3) ?? '0') ?? 0;
+      eta = (h * 3600 + m * 60 + s).toDouble();
+    }
+
+    return YtDlpProgressSample(
+      progress: ratio,
+      downloadedBytes: downloaded,
+      totalBytes: totalBytes,
+      speedBytesPerSec: speed,
+      etaSeconds: eta,
+    );
+  }
+
+  static String mergeOutputFormatFor(VideoFormatOption? fmt) {
+    final ext = (fmt?.ext ?? '').toLowerCase();
+    final vc = (fmt?.vcodec ?? '').toLowerCase();
+    if (ext == 'webm' || vc.contains('vp9') || vc.contains('vp8') || vc.contains('av01')) {
+      return 'mkv';
+    }
+    return 'mp4';
+  }
+
+  static String extractStderrReason(String stderr, int exitCode) {
+    final lines = stderr
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList(growable: false);
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].startsWith('ERROR:')) {
+        final cleaned = lines[i].substring('ERROR:'.length).trim();
+        if (cleaned.isNotEmpty) return cleaned;
+      }
+    }
+    return lines.isNotEmpty ? lines.last : 'exit code $exitCode';
+  }
 
   Future<String> download({
     required DownloadJobRequest request,
@@ -25,8 +141,14 @@ class YtDlpStreamDownloader {
     required bool Function() isCancelled,
     required void Function(String? pid) setActiveProcessId,
     required void Function(DownloadPhase phase) setActivePhase,
-    required void Function(DownloadPhase phase, double progress, double eta)
-        onProgress,
+    required void Function(
+      DownloadPhase phase,
+      double progress,
+      double eta,
+      int downloadedBytes,
+      int totalBytes,
+      double speedBytesPerSec,
+    ) onProgress,
   }) async {
     final phase = request.audioOnly
         ? DownloadPhase.downloadingAudio
@@ -34,20 +156,45 @@ class YtDlpStreamDownloader {
     setActivePhase(phase);
     final pid = '${request.id}_ytdlp';
     setActiveProcessId(pid);
-    onProgress(phase, 0.0, -1.0);
+    var lastTotalBytes = request.audioOnly
+        ? (audioOption?.filesize ?? formatOption?.audioSize ?? 0)
+        : (formatOption?.filesizeApprox ?? 0) + (formatOption?.audioSize ?? 0);
+    var lastDownloadedBytes = 0;
+    var lastSampleAt = DateTime.now();
+    onProgress(phase, 0.0, -1.0, 0, lastTotalBytes, 0.0);
 
     StreamSubscription<NativeProgressEvent>? sub;
     try {
       sub = _youtubeDl.events
           .where((e) => e.processId == pid && e.type == 'progress')
           .listen((ev) {
-        if (!isCancelled()) {
-          onProgress(
-            phase,
-            (ev.progress / 100.0).clamp(0.0, 1.0),
-            ev.etaSeconds.toDouble(),
-          );
+        if (isCancelled()) return;
+        final fallbackRatio = (ev.progress / 100.0).clamp(0.0, 1.0);
+        final sample = parseProgressLine(
+          ev.line,
+          fallbackRatio: fallbackRatio,
+          fallbackEta: ev.etaSeconds.toDouble(),
+          lastTotalBytes: lastTotalBytes,
+        );
+        if (sample.totalBytes > 0) lastTotalBytes = sample.totalBytes;
+        var speed = sample.speedBytesPerSec;
+        final now = DateTime.now();
+        final dt = now.difference(lastSampleAt).inMilliseconds / 1000.0;
+        if (speed <= 0 && dt >= 0.1 && sample.downloadedBytes > lastDownloadedBytes) {
+          speed = (sample.downloadedBytes - lastDownloadedBytes) / dt;
         }
+        if (sample.downloadedBytes > 0) {
+          lastDownloadedBytes = sample.downloadedBytes;
+          lastSampleAt = now;
+        }
+        onProgress(
+          phase,
+          sample.progress,
+          sample.etaSeconds,
+          sample.downloadedBytes > 0 ? sample.downloadedBytes : lastDownloadedBytes,
+          lastTotalBytes,
+          speed,
+        );
       });
     } catch (_) {}
 
@@ -86,7 +233,8 @@ class YtDlpStreamDownloader {
           '-f': formatSpec,
           '-o': p.join(jobDir, 'ytdlp_%(id)s.%(ext)s'),
           '--no-playlist': true,
-          if (!request.audioOnly) '--merge-output-format': 'mp4',
+          if (!request.audioOnly)
+            '--merge-output-format': mergeOutputFormatFor(formatOption),
           if (attemptCookie != null && attemptCookie.isNotEmpty)
             '--cookies': attemptCookie,
           if (request.headers.isNotEmpty)
@@ -108,9 +256,10 @@ class YtDlpStreamDownloader {
             );
           }
           if (!res.isSuccess) {
+            final reason = extractStderrReason(res.stderr, res.exitCode);
             throw MediaExtractionException(
               kind: MediaErrorKind.networkError,
-              message: 'yt-dlp failed (${res.exitCode})',
+              message: 'yt-dlp failed: $reason',
               rawDetails: res.stderr,
             );
           }

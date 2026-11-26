@@ -320,7 +320,7 @@ void main() {
         isCancelled: () => false,
         setActiveProcessId: (_) {},
         setActivePhase: (_) {},
-        onProgress: (_, _, _) {},
+        onProgress: (_, _, _, _, _, _) {},
       );
       expect(out, endsWith('ytdlp_final.mp4'));
       expect(seen.length, 4);
@@ -409,7 +409,7 @@ void main() {
           setActiveProcessId: (_) {},
           setActivePhase: (_) {},
           onTurboProgress: (_, _) {},
-          onYtDlpProgress: (_, _, _) {},
+          onYtDlpProgress: (_, _, _, _, _, _) {},
         );
 
         expect(ytdlInvoked, 0);

@@ -185,6 +185,12 @@ class DownloadJobState {
     DateTime? createdAt,
     String category = 'Other',
   }) {
+    final initialTotal = request.audioOnly
+        ? (request.selectedAudioTrack?.filesize ??
+            request.selectedVideoFormat?.audioSize ??
+            0)
+        : (request.selectedVideoFormat?.filesizeApprox ?? 0) +
+            (request.selectedVideoFormat?.audioSize ?? 0);
     return DownloadJobState(
       id: request.id,
       title: request.title,
@@ -193,7 +199,7 @@ class DownloadJobState {
       status: DownloadStatus.queued,
       progress: 0.0,
       downloadedBytes: 0,
-      totalBytes: 0,
+      totalBytes: initialTotal > 0 ? initialTotal : 0,
       speedBytesPerSec: 0.0,
       etaSeconds: -1.0,
       category: request.categorySubFolder ?? category,

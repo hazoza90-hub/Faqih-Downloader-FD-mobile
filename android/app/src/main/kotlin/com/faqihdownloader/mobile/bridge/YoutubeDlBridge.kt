@@ -47,6 +47,10 @@ class YoutubeDlBridge(private val appContext: Context) :
         }
     }
 
+    fun prewarmAsync() {
+        scope.launch { runCatching { ensureYoutubeDlInitialized() } }
+    }
+
     fun dispose() {
         ffmpegRunner.cancelAll()
         scope.cancel()
@@ -118,7 +122,6 @@ class YoutubeDlBridge(private val appContext: Context) :
             request.addOption("--no-check-formats")
             request.addOption("--extractor-retries", "1")
             request.addOption("--retries", "1")
-            request.addOption("--force-ipv4")
             val effectiveTimeout = timeoutSeconds?.takeIf { it > 0 } ?: 15
             request.addOption("--socket-timeout", effectiveTimeout.toString())
             applyExtractorArgs(request, url, extractorArgs)
@@ -156,12 +159,15 @@ class YoutubeDlBridge(private val appContext: Context) :
 
         runAsync(result) {
             ensureYoutubeDlInitialized()
+            ensureFfmpegInitialized()
             val request = YoutubeDLRequest(url)
             if (!hasFlag(args, options, "--no-check-certificates")) request.addOption("--no-check-certificates")
             if (!hasFlag(args, options, "--no-cache-dir")) request.addOption("--no-cache-dir")
-            if (!hasFlag(args, options, "--force-ipv4")) request.addOption("--force-ipv4")
+            if (!hasFlag(args, options, "--newline")) request.addOption("--newline")
             if (!hasFlag(args, options, "--concurrent-fragments")) request.addOption("--concurrent-fragments", "4")
             if (!hasFlag(args, options, "--extractor-retries")) request.addOption("--extractor-retries", "1")
+            if (!hasFlag(args, options, "--retries")) request.addOption("--retries", "3")
+            if (!hasFlag(args, options, "--fragment-retries")) request.addOption("--fragment-retries", "3")
             if (!hasFlag(args, options, "--socket-timeout")) request.addOption("--socket-timeout", "15")
             if (!hasFlag(args, options, "--extractor-args")) applyExtractorArgs(request, url, extractorArgs)
             var i = 0

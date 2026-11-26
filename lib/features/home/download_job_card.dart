@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/i18n/translator.dart';
 import '../../core/models/download_status.dart';
@@ -145,11 +146,26 @@ class DownloadJobCard extends StatelessWidget {
             if (job.errorMessage != null &&
                 job.errorMessage!.trim().isNotEmpty) ...<Widget>[
               const SizedBox(height: 4),
-              Text(
-                job.errorMessage!,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: AppColors.danger),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      job.errorMessage!,
+                      maxLines: 4,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: AppColors.danger),
+                    ),
+                  ),
+                  IconButton(
+                    key: Key('job_copy_error_${job.id}'),
+                    tooltip: tr('btn_copy'),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    icon: const Icon(Icons.copy_rounded, size: 16, color: AppColors.danger),
+                    onPressed: () => Clipboard.setData(ClipboardData(text: job.errorMessage!)),
+                  ),
+                ],
               ),
             ],
           ],

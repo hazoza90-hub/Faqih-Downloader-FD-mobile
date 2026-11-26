@@ -288,8 +288,15 @@ class StreamDownloadCoordinator {
       setActiveProcessId: (pid) => _activeProcessId = pid,
       setActivePhase: (phase) => _activeDownloadPhase = phase,
       onTurboProgress: _handleTurboProgress,
-      onYtDlpProgress: (phase, ratio, eta) {
-        _emitState(_state.copyWith(phase: phase, progress: ratio, etaSeconds: eta));
+      onYtDlpProgress: (phase, ratio, eta, downloaded, total, speed) {
+        _emitState(_state.copyWith(
+          phase: phase,
+          progress: ratio,
+          etaSeconds: eta,
+          downloadedBytes: downloaded > 0 ? downloaded : _state.downloadedBytes,
+          totalBytes: total > 0 ? total : _state.totalBytes,
+          speedBytesPerSec: speed,
+        ));
       },
     );
 
