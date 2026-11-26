@@ -43,17 +43,47 @@ abstract final class HttpClientFactory {
       if (proxyHost != null) {
         return Socket.startConnect(proxyHost, proxyPort ?? 80);
       }
-      final port = uri.hasPort
-          ? uri.port
-          : (uri.scheme.toLowerCase() == 'https' ? 443 : 80);
+      final isHttps = uri.scheme.toLowerCase() == 'https';
+      final port = uri.hasPort ? uri.port : (isHttps ? 443 : 80);
       final preferredType = preferredAddressTypeForUri(uri);
       if (preferredType != null) {
         try {
           final addrs = await InternetAddress.lookup(uri.host, type: preferredType);
           if (addrs.isNotEmpty) {
-            return Socket.startConnect(addrs.first, port);
+            if (!isHttps) {
+              return Socket.startConnect(addrs.first, port);
+            }
+            final rawTask = await Socket.startConnect(addrs.first, port);
+            var cancelled = false;
+            final secureFuture = rawTask.socket.then<Socket>((raw) async {
+              if (cancelled) {
+                raw.destroy();
+                throw const SocketException('Connection cancelled');
+              }
+              final secure = await SecureSocket.secure(
+                raw,
+                host: uri.host,
+                onBadCertificate: (_) => true,
+              );
+              if (cancelled) {
+                secure.destroy();
+                throw const SocketException('Connection cancelled');
+              }
+              return secure;
+            });
+            return ConnectionTask.fromSocket<Socket>(secureFuture, () {
+              cancelled = true;
+              rawTask.cancel();
+            });
           }
         } catch (_) {}
+      }
+      if (isHttps) {
+        return SecureSocket.startConnect(
+          uri.host,
+          port,
+          onBadCertificate: (_) => true,
+        );
       }
       return Socket.startConnect(uri.host, port);
     };

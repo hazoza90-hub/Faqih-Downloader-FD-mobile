@@ -193,6 +193,63 @@ void main() {
       });
     });
 
+    test('1b) HttpClientFactory.create sends TLS ClientHello (0x16 0x03) for HTTPS and plaintext HTTP for http://', () async {
+      await runWithRealHttp(() async {
+        final rawServer = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => rawServer.close());
+        final firstPacket = Completer<List<int>>();
+
+        final sub = rawServer.listen((socket) {
+          socket.listen(
+            (data) {
+              if (!firstPacket.isCompleted) firstPacket.complete(data);
+              socket.destroy();
+            },
+            onError: (_) {},
+            onDone: () {
+              if (!firstPacket.isCompleted) firstPacket.complete(const <int>[]);
+            },
+          );
+        });
+        addTearDown(() => sub.cancel());
+
+        final httpsClient = HttpClientFactory.create(connectionTimeout: const Duration(seconds: 5));
+        addTearDown(() => httpsClient.close(force: true));
+
+        final reqFuture = httpsClient
+            .getUrl(Uri.parse('https://127.0.0.1:${rawServer.port}/tls-check'))
+            .then((req) => req.close())
+            .then<void>((_) {}, onError: (_) {});
+
+        final bytes = await firstPacket.future.timeout(const Duration(seconds: 5));
+        await reqFuture;
+
+        expect(bytes.length, greaterThanOrEqualTo(2));
+        expect(bytes.sublist(0, 2), <int>[0x16, 0x03]);
+        expect(bytes.sublist(0, 2), isNot(<int>[0x47, 0x45]));
+      });
+
+      await runWithRealHttp(() async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((req) async {
+          if (req.uri.path == '/plain-check') {
+            req.response.write('plain-ok');
+          } else {
+            req.response.statusCode = HttpStatus.notFound;
+          }
+          await req.response.close();
+        });
+
+        final plainClient = HttpClientFactory.create(connectionTimeout: const Duration(seconds: 5));
+        addTearDown(() => plainClient.close(force: true));
+        final req = await plainClient.getUrl(Uri.parse('http://127.0.0.1:${server.port}/plain-check'));
+        final resp = await req.close();
+        expect(resp.statusCode, HttpStatus.ok);
+        expect(await utf8.decodeStream(resp), 'plain-ok');
+      });
+    });
+
     test('2) InnerTube & resolveFormatFilesize fall back to clen= and prefer averageBitrate over bitrate', () {
       final extractor = YouTubeInnerTubeExtractor();
       final info = extractor.parsePlayerResponse(<String, dynamic>{
