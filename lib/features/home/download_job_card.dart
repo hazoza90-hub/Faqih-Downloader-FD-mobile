@@ -97,28 +97,37 @@ class DownloadJobCard extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      Text(
-                        job.totalBytes > 0
-                            ? '${formatFileSize(job.downloadedBytes)} / ${formatFileSize(job.totalBytes)}'
-                            : formatFileSize(job.downloadedBytes),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      Text(
-                        formatSpeed(job.speedBytesPerSec),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.accent,
-                        ),
-                      ),
-                      if (job.etaSeconds > 0)
-                        Text(
-                          formatEta(job.etaSeconds),
+                      Directionality(
+                        textDirection: TextDirection.ltr,
+                        child: Text(
+                          job.totalBytes > 0
+                              ? '${formatFileSize(job.downloadedBytes)} / ${formatFileSize(job.totalBytes)}'
+                              : formatFileSize(job.downloadedBytes),
                           style: const TextStyle(
                             fontSize: 12,
                             color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      Directionality(
+                        textDirection: TextDirection.ltr,
+                        child: Text(
+                          formatSpeed(job.speedBytesPerSec),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.accent,
+                          ),
+                        ),
+                      ),
+                      if (job.etaSeconds > 0)
+                        Directionality(
+                          textDirection: TextDirection.ltr,
+                          child: Text(
+                            formatEta(job.etaSeconds),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
                           ),
                         ),
                     ],

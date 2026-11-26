@@ -177,15 +177,20 @@ String? extractYouTubeId(String url) {
 }
 
 final RegExp _httpUrlScanRegex = RegExp(r'https?://\S+', caseSensitive: false);
+final RegExp _concatenatedHttpRegex = RegExp(
+  r'(?<=[^\s=?&/])(?=https?://)',
+  caseSensitive: false,
+);
 final RegExp _trailingPunctuationRegex = RegExp(r'''[.,;:!?)\]\}>"']+$''');
 
 List<String> extractUrls(String text) {
   if (text.trim().isEmpty) {
     return const <String>[];
   }
+  final normalized = text.replaceAll(_concatenatedHttpRegex, ' ');
   final seen = <String>{};
   final extracted = <String>[];
-  for (final match in _httpUrlScanRegex.allMatches(text)) {
+  for (final match in _httpUrlScanRegex.allMatches(normalized)) {
     var candidate = match.group(0)!.trim();
     candidate = candidate.replaceFirst(_trailingPunctuationRegex, '');
     if (isHttpUrl(candidate) && seen.add(candidate)) {

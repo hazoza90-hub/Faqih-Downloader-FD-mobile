@@ -175,7 +175,7 @@ void main() {
           if (attempts.length == 1) {
             await File(p.join(jobDir, 'ytdlp_stale.part')).writeAsBytes(<int>[1]);
           }
-          if (attempts.length < 4) {
+          if (attempts.length < 3) {
             return <String, Object?>{'exitCode': 1, 'stdout': '', 'stderr': '403'};
           }
           await File(p.join(jobDir, 'ytdlp_ok.mp4')).writeAsBytes(<int>[1, 2, 3]);
@@ -207,7 +207,6 @@ void main() {
       expect(File(p.join(jobDir, 'ytdlp_stale.part')).existsSync(), isFalse);
       expect(attempts, <String>[
         'youtube:player_client=android_vr,ios|NO_COOKIE',
-        'youtube:player_client=mweb|NO_COOKIE',
         '|NO_COOKIE',
         'youtube:player_client=mweb,web|/tmp/cookies.txt',
       ]);

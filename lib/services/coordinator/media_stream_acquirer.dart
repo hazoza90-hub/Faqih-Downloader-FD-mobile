@@ -237,6 +237,7 @@ class MediaStreamAcquirer {
             backupInfo, targetHeight,
             preferredFormatId: originalFmt?.formatId,
             preferredVcodec: originalFmt?.vcodec,
+            strictHeight: targetHeight >= 480,
           );
     final wantsAudio = request.audioOnly ||
         (altFmt?.needsAudioMerge ?? false) ||

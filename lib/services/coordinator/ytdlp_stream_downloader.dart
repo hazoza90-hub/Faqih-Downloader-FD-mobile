@@ -139,8 +139,13 @@ class YtDlpStreamDownloader {
       });
     } catch (_) {}
 
-    final formatSpec = buildSelector(request, formatOption, audioOption);
     final isYt = UrlDetector.isYouTubeUrl(request.url);
+    final formatSpec = buildSelector(
+      request,
+      formatOption,
+      audioOption,
+      strictHeight: isYt && (formatOption?.height ?? 0) >= 480,
+    );
     final rawCookie = request.cookiesFile?.trim() ?? '';
     final headerList = <String>[
       for (final e in request.headers.entries)
@@ -150,7 +155,6 @@ class YtDlpStreamDownloader {
     final attempts = isYt
         ? <({String? strategy, String? cookie})>[
             (strategy: 'youtube:player_client=android_vr,ios', cookie: null),
-            (strategy: 'youtube:player_client=mweb', cookie: null),
             (strategy: '', cookie: null),
             if (rawCookie.isNotEmpty)
               (strategy: 'youtube:player_client=mweb,web', cookie: rawCookie),
@@ -289,8 +293,9 @@ class YtDlpStreamDownloader {
   static String buildSelector(
     DownloadJobRequest request,
     VideoFormatOption? fmt,
-    AudioTrack? audio,
-  ) {
+    AudioTrack? audio, {
+    bool strictHeight = false,
+  }) {
     if (request.audioOnly) {
       return (audio?.formatId.isNotEmpty ?? false)
           ? '${audio!.formatId}/bestaudio/best'
@@ -298,12 +303,21 @@ class YtDlpStreamDownloader {
     }
     if (fmt != null && fmt.formatId.isNotEmpty) {
       final family = MediaStreamHelpers.codecFamilyOf(fmt.vcodec);
-      final codecLayer = (fmt.height > 0 && family.isNotEmpty)
-          ? 'bestvideo[height<=${fmt.height}][vcodec^=$family]+bestaudio/'
-          : '';
-      final hFallback = fmt.height > 0
-          ? '${codecLayer}bestvideo[height<=${fmt.height}]+bestaudio/best[height<=${fmt.height}]/best'
-          : 'best';
+      final String hFallback;
+      if (strictHeight && fmt.height >= 480) {
+        final minH = (fmt.height * 0.85).round();
+        final range = '[height>=$minH][height<=${fmt.height}]';
+        hFallback = family.isNotEmpty
+            ? 'bestvideo$range[vcodec^=$family]+bestaudio/bestvideo$range+bestaudio/best$range'
+            : 'bestvideo$range+bestaudio/best$range';
+      } else {
+        final codecLayer = (fmt.height > 0 && family.isNotEmpty)
+            ? 'bestvideo[height<=${fmt.height}][vcodec^=$family]+bestaudio/'
+            : '';
+        hFallback = fmt.height > 0
+            ? '${codecLayer}bestvideo[height<=${fmt.height}]+bestaudio/best[height<=${fmt.height}]/best'
+            : 'best';
+      }
       final hasDubbing =
           audio != null && !audio.isOriginal && audio.formatId.isNotEmpty;
       if (hasDubbing) {

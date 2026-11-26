@@ -295,7 +295,7 @@ void main() {
           final args = Map<Object?, Object?>.from(call.arguments as Map);
           final opts = Map<Object?, Object?>.from(args['options'] as Map);
           seen.add((extArgs: args['extractorArgs'], cookie: opts['--cookies']));
-          if (seen.length < 4) {
+          if (seen.length < 3) {
             return <String, Object?>{'exitCode': 1, 'stdout': '', 'stderr': '403'};
           }
           await File(p.join(jobDir, 'ytdlp_final.mp4')).writeAsBytes(<int>[1, 2, 3]);
@@ -323,14 +323,13 @@ void main() {
         onProgress: (_, _, _, _, _, _) {},
       );
       expect(out, endsWith('ytdlp_final.mp4'));
-      expect(seen.length, 4);
+      expect(seen.length, 3);
       expect(seen.map((e) => e.extArgs).toList(), <Object?>[
         'youtube:player_client=android_vr,ios',
-        'youtube:player_client=mweb',
         '',
         'youtube:player_client=mweb,web',
       ]);
-      expect(seen.map((e) => e.cookie).toList(), <Object?>[null, null, null, '/tmp/cookies.txt']);
+      expect(seen.map((e) => e.cookie).toList(), <Object?>[null, null, '/tmp/cookies.txt']);
     });
 
     test('5) MediaStreamAcquirer resolves YouTube URL without selectedVideoFormat via InnerTube and runs Turbo', () async {

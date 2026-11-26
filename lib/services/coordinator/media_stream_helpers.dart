@@ -58,10 +58,21 @@ abstract final class MediaStreamHelpers {
     int preferredHeight, {
     String? preferredFormatId,
     String? preferredVcodec,
+    bool strictHeight = false,
   }) {
-    final direct = info.videoFormats
-        .where((f) => f.isDirectTurboSupported && !isManifestUrl(f.videoUrl, protocol: f.protocol))
-        .toList(growable: false);
+    final minHeight = (strictHeight && preferredHeight > 0)
+        ? (preferredHeight * 0.85).round()
+        : 0;
+    final direct = info.videoFormats.where((f) {
+      if (!f.isDirectTurboSupported ||
+          isManifestUrl(f.videoUrl, protocol: f.protocol)) {
+        return false;
+      }
+      if (strictHeight && preferredHeight > 0) {
+        return f.height >= minHeight && f.height <= preferredHeight;
+      }
+      return true;
+    }).toList(growable: false);
     if (direct.isEmpty) return null;
     final targetId = (preferredFormatId ?? '').trim();
     if (targetId.isNotEmpty) {
