@@ -11,6 +11,7 @@ import '../../platform/native_models.dart';
 import '../../platform/youtube_dl_channel.dart';
 import '../media/media_exceptions.dart';
 import 'download_job_models.dart';
+import 'media_stream_helpers.dart';
 import 'ytdlp_progress_parser.dart';
 
 export 'ytdlp_progress_parser.dart' show YtDlpProgressSample;
@@ -75,6 +76,7 @@ class YtDlpStreamDownloader {
     var lastTotalBytes = request.audioOnly
         ? (audioOption?.filesize ?? formatOption?.audioSize ?? 0)
         : (formatOption?.filesizeApprox ?? 0) + (formatOption?.audioSize ?? 0);
+    final initialKnownTotal = lastTotalBytes;
     var lastDownloadedBytes = 0;
     var lastProgress = 0.0;
     var lastSampleAt = DateTime.now();
@@ -102,22 +104,35 @@ class YtDlpStreamDownloader {
           lastTotalBytes: lastTotalBytes,
         );
         lastProgress = sample.progress;
-        if (sample.totalBytes > 0) lastTotalBytes = sample.totalBytes;
+        var acceptedTotal = true;
+        if (sample.totalBytes > 0) {
+          acceptedTotal = !sample.isTotalApproximate ||
+              lastTotalBytes <= 0 ||
+              initialKnownTotal <= 0 ||
+              sample.progress >= 0.15;
+          if (acceptedTotal) {
+            lastTotalBytes = sample.totalBytes;
+          }
+        }
+        final effectiveDownloaded =
+            (!acceptedTotal && lastTotalBytes > 0 && sample.progress > 0)
+                ? (lastTotalBytes * sample.progress).round()
+                : sample.downloadedBytes;
         var speed = sample.speedBytesPerSec;
         final now = DateTime.now();
         final dt = now.difference(lastSampleAt).inMilliseconds / 1000.0;
-        if (speed <= 0 && dt >= 0.1 && sample.downloadedBytes > lastDownloadedBytes) {
-          speed = (sample.downloadedBytes - lastDownloadedBytes) / dt;
+        if (speed <= 0 && dt >= 0.1 && effectiveDownloaded > lastDownloadedBytes) {
+          speed = (effectiveDownloaded - lastDownloadedBytes) / dt;
         }
-        if (sample.downloadedBytes > 0) {
-          lastDownloadedBytes = sample.downloadedBytes;
+        if (effectiveDownloaded > 0) {
+          lastDownloadedBytes = effectiveDownloaded;
           lastSampleAt = now;
         }
         onProgress(
           phase,
           sample.progress,
           sample.etaSeconds,
-          sample.downloadedBytes > 0 ? sample.downloadedBytes : lastDownloadedBytes,
+          effectiveDownloaded > 0 ? effectiveDownloaded : lastDownloadedBytes,
           lastTotalBytes,
           speed,
         );
@@ -134,8 +149,8 @@ class YtDlpStreamDownloader {
     ];
     final attempts = isYt
         ? <({String? strategy, String? cookie})>[
-            (strategy: 'youtube:player_client=android_vr', cookie: null),
-            (strategy: 'youtube:player_client=ios,mweb', cookie: null),
+            (strategy: 'youtube:player_client=android_vr,ios', cookie: null),
+            (strategy: 'youtube:player_client=mweb', cookie: null),
             (strategy: '', cookie: null),
             if (rawCookie.isNotEmpty)
               (strategy: 'youtube:player_client=mweb,web', cookie: rawCookie),
@@ -159,6 +174,7 @@ class YtDlpStreamDownloader {
           );
         }
         _cleanupAttemptFiles(jobDir);
+        lastTotalBytes = initialKnownTotal;
         lastDownloadedBytes = 0;
         lastProgress = 0.0;
         lastSampleAt = DateTime.now();
@@ -237,9 +253,9 @@ class YtDlpStreamDownloader {
   }
 
   Future<bool> _tryAutoUpdateOnce() async {
-    if (_autoUpdatedThisSession) return false;
     final inFlight = _inFlightAutoUpdate;
     if (inFlight != null) return inFlight;
+    if (_autoUpdatedThisSession) return false;
 
     _autoUpdatedThisSession = true;
     final fut = () async {
@@ -281,8 +297,12 @@ class YtDlpStreamDownloader {
           : 'bestaudio/best';
     }
     if (fmt != null && fmt.formatId.isNotEmpty) {
+      final family = MediaStreamHelpers.codecFamilyOf(fmt.vcodec);
+      final codecLayer = (fmt.height > 0 && family.isNotEmpty)
+          ? 'bestvideo[height<=${fmt.height}][vcodec^=$family]+bestaudio/'
+          : '';
       final hFallback = fmt.height > 0
-          ? 'bestvideo[height<=${fmt.height}]+bestaudio/best[height<=${fmt.height}]/best'
+          ? '${codecLayer}bestvideo[height<=${fmt.height}]+bestaudio/best[height<=${fmt.height}]/best'
           : 'best';
       final hasDubbing =
           audio != null && !audio.isOriginal && audio.formatId.isNotEmpty;

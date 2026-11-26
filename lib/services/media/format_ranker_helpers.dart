@@ -45,7 +45,7 @@ double scoreVideoOption(VideoFormatOption f) {
   final vc = f.vcodec.toLowerCase();
   final codecScore = (vc.contains('avc1') || vc.contains('h264'))
       ? 20000.0
-      : (vc.contains('vp9') ? 4000.0 : 1500.0);
+      : ((vc.contains('vp9') || vc.contains('vp09')) ? 10000.0 : 1500.0);
   final extScore = f.ext == 'mp4' ? 5000.0 : 0.0;
   final progScore = f.isProgressive ? 500.0 : 0.0;
   return directScore +
@@ -74,6 +74,12 @@ int resolveFormatFilesize(
     fallback: parseIntValue(fmt['filesize_approx']),
   );
   if (exact > 0) return exact;
+  final rawUrl = fmt['url']?.toString().trim() ?? '';
+  if (rawUrl.isNotEmpty) {
+    final clen =
+        int.tryParse(Uri.tryParse(rawUrl)?.queryParameters['clen'] ?? '') ?? 0;
+    if (clen > 0) return clen;
+  }
   if (rootDuration > 0 && tbrKbps > 0) {
     return ((tbrKbps * 1000.0 / 8.0) * rootDuration).round();
   }

@@ -19,6 +19,17 @@ abstract final class HttpClientFactory {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
+  /// Returns the IP family encoded in YouTube CDN's `ip=` query parameter, or `null`.
+  static InternetAddressType? preferredAddressTypeForUri(Uri uri) {
+    final host = uri.host.trim().toLowerCase();
+    if (!host.contains('googlevideo.com') || isPrivateOrLoopbackHost(host)) {
+      return null;
+    }
+    final ip = (uri.queryParameters['ip'] ?? '').trim();
+    if (ip.isEmpty) return null;
+    return ip.contains(':') ? InternetAddressType.IPv6 : InternetAddressType.IPv4;
+  }
+
   static HttpClient create({
     Duration connectionTimeout = const Duration(seconds: 20),
     Duration idleTimeout = const Duration(seconds: 20),
@@ -28,6 +39,24 @@ abstract final class HttpClientFactory {
       ..connectionTimeout = connectionTimeout
       ..idleTimeout = idleTimeout
       ..badCertificateCallback = (X509Certificate cert, String host, int port) => true;
+    client.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+      if (proxyHost != null) {
+        return Socket.startConnect(proxyHost, proxyPort ?? 80);
+      }
+      final port = uri.hasPort
+          ? uri.port
+          : (uri.scheme.toLowerCase() == 'https' ? 443 : 80);
+      final preferredType = preferredAddressTypeForUri(uri);
+      if (preferredType != null) {
+        try {
+          final addrs = await InternetAddress.lookup(uri.host, type: preferredType);
+          if (addrs.isNotEmpty) {
+            return Socket.startConnect(addrs.first, port);
+          }
+        } catch (_) {}
+      }
+      return Socket.startConnect(uri.host, port);
+    };
     if (maxConnectionsPerHost != null && maxConnectionsPerHost > 0) {
       client.maxConnectionsPerHost = maxConnectionsPerHost;
     }

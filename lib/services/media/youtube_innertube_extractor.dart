@@ -197,9 +197,15 @@ class YouTubeInnerTubeExtractor {
       if (!UrlDetector.isHttpUrl(url)) continue;
 
       final parsedMime = _parseMime(raw['mimeType']?.toString() ?? '', progressive: progressive);
-      final bitrate = int.tryParse('${raw['bitrate'] ?? ''}') ?? 0;
-      final tbrKbps = bitrate > 0 ? bitrate / 1000.0 : 0.0;
-      final contentLen = int.tryParse('${raw['contentLength'] ?? ''}');
+      final avgBitrate = int.tryParse('${raw['averageBitrate'] ?? ''}') ?? 0;
+      final peakBitrate = int.tryParse('${raw['bitrate'] ?? ''}') ?? 0;
+      final effectiveBitrate = avgBitrate > 0 ? avgBitrate : peakBitrate;
+      final tbrKbps = effectiveBitrate > 0 ? effectiveBitrate / 1000.0 : 0.0;
+      var contentLen = int.tryParse('${raw['contentLength'] ?? ''}') ?? 0;
+      if (contentLen <= 0) {
+        contentLen =
+            int.tryParse(Uri.tryParse(url)?.queryParameters['clen'] ?? '') ?? 0;
+      }
       final qualityNote = (raw['qualityLabel'] ?? raw['quality'] ?? '').toString().trim();
       final fmt = <String, dynamic>{
         'format_id': '${raw['itag'] ?? ''}', 'url': url, 'ext': parsedMime.ext,
@@ -207,7 +213,7 @@ class YouTubeInnerTubeExtractor {
         if (raw['width'] != null) 'width': raw['width'],
         if (raw['height'] != null) 'height': raw['height'],
         if (raw['fps'] != null) 'fps': raw['fps'],
-        if (contentLen != null && contentLen > 0) 'filesize': contentLen,
+        if (contentLen > 0) 'filesize': contentLen,
         if (tbrKbps > 0) 'tbr': tbrKbps,
         if (parsedMime.isAudioOnly && tbrKbps > 0) 'abr': tbrKbps,
         'format_note': qualityNote,

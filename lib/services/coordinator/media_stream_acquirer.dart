@@ -233,7 +233,11 @@ class MediaStreamAcquirer {
         : request.preferredVideoHeight;
     final altFmt = request.audioOnly
         ? null
-        : MediaStreamHelpers.pickInnerTubeFormat(backupInfo, targetHeight);
+        : MediaStreamHelpers.pickInnerTubeFormat(
+            backupInfo, targetHeight,
+            preferredFormatId: originalFmt?.formatId,
+            preferredVcodec: originalFmt?.vcodec,
+          );
     final wantsAudio = request.audioOnly ||
         (altFmt?.needsAudioMerge ?? false) ||
         (originalAudio != null && !originalAudio.isOriginal);
@@ -306,7 +310,16 @@ class MediaStreamAcquirer {
       return AcquiredMediaFiles(videoPath: audioPath);
     }
 
-    final vExt = fmt!.ext.trim().isEmpty ? 'mp4' : fmt.ext.trim();
+    final wantsSeparateAudio =
+        fmt!.needsAudioMerge || (audio != null && !audio.isOriginal);
+    final aUrl = (audio?.url.isNotEmpty ?? false) ? audio!.url : fmt.audioUrl;
+    final hasSeparateAudio =
+        wantsSeparateAudio && aUrl != null && aUrl.isNotEmpty;
+    final estimatedAudioBytes =
+        (audio?.filesize ?? 0) > 0 ? audio!.filesize : fmt.audioSize;
+    var lastVideoTotalBytes = 0;
+
+    final vExt = fmt.ext.trim().isEmpty ? 'mp4' : fmt.ext.trim();
     final vPath = p.join(jobDir, 'raw_video.$vExt');
     setActivePhase(DownloadPhase.downloadingVideo);
     await runTurboTransfer(
@@ -323,14 +336,20 @@ class MediaStreamAcquirer {
       isCancelled: isCancelled,
       isPaused: isPaused,
       setActiveRunner: setActiveRunner,
-      onProgress: onTurboProgress,
+      onProgress: (p, snap) {
+        if (snap.totalBytes > 0) lastVideoTotalBytes = snap.totalBytes;
+        final out = hasSeparateAudio
+            ? MediaStreamHelpers.combineDualStreamSnapshot(
+                snap, isAudioStage: false, estimatedAudioBytes: estimatedAudioBytes)
+            : snap;
+        onTurboProgress(p, out);
+      },
     );
 
     String? aPath;
-    final wantsSeparateAudio =
-        fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
-    final aUrl = (audio?.url.isNotEmpty ?? false) ? audio!.url : fmt.audioUrl;
-    if (wantsSeparateAudio && aUrl != null && aUrl.isNotEmpty) {
+    if (hasSeparateAudio) {
+      final actualVideoBytes = MediaStreamHelpers.resolveCompletedFileBytes(
+          vPath, fallbackBytes: lastVideoTotalBytes);
       final aExt = (audio?.ext ?? fmt.audioExt).trim();
       aPath = p.join(jobDir, 'raw_audio.${aExt.isEmpty ? 'm4a' : aExt}');
       setActivePhase(DownloadPhase.downloadingAudio);
@@ -348,18 +367,21 @@ class MediaStreamAcquirer {
         isCancelled: isCancelled,
         isPaused: isPaused,
         setActiveRunner: setActiveRunner,
-        onProgress: onTurboProgress,
+        onProgress: (p, snap) => onTurboProgress(
+          p,
+          MediaStreamHelpers.combineDualStreamSnapshot(
+            snap, isAudioStage: true, estimatedAudioBytes: estimatedAudioBytes,
+            completedVideoBytes: actualVideoBytes,
+          ),
+        ),
       );
     }
     return AcquiredMediaFiles(videoPath: vPath, audioPath: aPath);
   }
 
   static bool canTryTurbo(
-    DownloadJobRequest request,
-    VideoFormatOption? fmt,
-    AudioTrack? audio,
-  ) =>
-      MediaStreamHelpers.canTryTurbo(request, fmt, audio);
+    DownloadJobRequest request, VideoFormatOption? fmt, AudioTrack? audio,
+  ) => MediaStreamHelpers.canTryTurbo(request, fmt, audio);
 
   static bool isManifestUrl(String url, {String protocol = ''}) =>
       MediaStreamHelpers.isManifestUrl(url, protocol: protocol);

@@ -264,9 +264,9 @@ class MediaExtractorService {
   }
 
   Future<bool> _tryAutoUpdateOnce() async {
-    if (_autoUpdatedThisSession) return false;
     final inFlight = _inFlightAutoUpdate;
     if (inFlight != null) return inFlight;
+    if (_autoUpdatedThisSession) return false;
 
     _autoUpdatedThisSession = true;
     final fut = () async {

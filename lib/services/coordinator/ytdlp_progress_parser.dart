@@ -8,6 +8,7 @@ class YtDlpProgressSample {
     required this.totalBytes,
     required this.speedBytesPerSec,
     required this.etaSeconds,
+    this.isTotalApproximate = false,
   });
 
   final double progress;
@@ -15,13 +16,14 @@ class YtDlpProgressSample {
   final int totalBytes;
   final double speedBytesPerSec;
   final double etaSeconds;
+  final bool isTotalApproximate;
 }
 
 /// Regex and line parsers for `yt-dlp` progress, merge containers, and stderr errors.
 abstract final class YtDlpProgressParser {
   static final RegExp pctRegex = RegExp(r'(\d+(?:\.\d+)?)%');
   static final RegExp totalRegex = RegExp(
-    r'\bof\s+~?\s*([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)\b',
+    r'\bof\s+(~)?\s*([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)\b',
     caseSensitive: false,
   );
   static final RegExp unknownDlRegex = RegExp(
@@ -65,8 +67,9 @@ abstract final class YtDlpProgressParser {
         ? ((double.tryParse(pctM.group(1)!) ?? 0.0) / 100.0).clamp(0.0, 1.0)
         : fallbackRatio.clamp(0.0, 1.0);
     final totalM = totalRegex.firstMatch(line);
+    final isTotalApproximate = totalM != null && totalM.group(1) != null;
     final parsedTotal = totalM != null
-        ? parseByteUnit(totalM.group(1)!, totalM.group(2)!).round()
+        ? parseByteUnit(totalM.group(2)!, totalM.group(3)!).round()
         : 0;
     final totalBytes = parsedTotal > 0 ? parsedTotal : lastTotalBytes;
 
@@ -98,13 +101,18 @@ abstract final class YtDlpProgressParser {
       totalBytes: totalBytes,
       speedBytesPerSec: speed,
       etaSeconds: eta,
+      isTotalApproximate: isTotalApproximate,
     );
   }
 
   static String mergeOutputFormatFor(VideoFormatOption? fmt) {
     final ext = (fmt?.ext ?? '').toLowerCase();
     final vc = (fmt?.vcodec ?? '').toLowerCase();
-    if (ext == 'webm' || vc.contains('vp9') || vc.contains('vp8') || vc.contains('av01')) {
+    if (ext == 'webm' ||
+        vc.contains('vp9') ||
+        vc.contains('vp09') ||
+        vc.contains('vp8') ||
+        vc.contains('av01')) {
       return 'mkv';
     }
     return 'mp4';

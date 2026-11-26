@@ -278,6 +278,7 @@ class MediaPostPipeline {
     if (rawExt == 'webm' ||
         pref == 'webm' ||
         vc.contains('vp9') ||
+        vc.contains('vp09') ||
         vc.contains('vp8') ||
         vc.contains('av01') ||
         vc.contains('theora')) {

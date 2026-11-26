@@ -144,7 +144,7 @@ class TurboDownloadEngine {
 
     final ownsClient = _injectedClient == null;
     final client = _injectedClient ?? HttpClientFactory.create(
-      connectionTimeout: const Duration(seconds: 20),
+      connectionTimeout: const Duration(seconds: 10),
       idleTimeout: const Duration(seconds: 20),
       maxConnectionsPerHost: math.max(maxConnections + 2, 8),
     );
@@ -187,6 +187,7 @@ class TurboDownloadEngine {
 
       _status = DownloadStatus.merging;
       _emitProgress();
+      await _saveQueue;
       final assembly = await _assembler.assemble(
         destinationPath: destinationPath,
         chunks: _chunks,
@@ -235,7 +236,7 @@ class TurboDownloadEngine {
       _initialElapsedSec = init.initialElapsedSec;
       _effectiveHeaders = HttpClientFactory.withCookieHeader(headers, init.cookieHeader);
       _chunks..clear()..addAll(init.chunks);
-      if (!init.restoredFromCheckpoint) await _saveCurrentState();
+      if (!init.restoredFromCheckpoint) unawaited(_saveCurrentState());
     } on ProbeException catch (e) {
       _status = DownloadStatus.failed;
       _emitProgress();

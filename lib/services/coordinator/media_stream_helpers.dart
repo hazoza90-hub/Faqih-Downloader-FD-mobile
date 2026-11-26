@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
 
 import '../../core/models/audio_track.dart';
 import '../../core/models/video_format_option.dart';
 import '../../core/models/youtube_stream_info.dart';
+import '../../engine/engine_callbacks.dart';
 import '../../engine/http_client_factory.dart';
 import 'download_job_models.dart';
 
@@ -42,20 +44,90 @@ abstract final class MediaStreamHelpers {
     } catch (_) {}
   }
 
+  static String codecFamilyOf(String vcodec) {
+    final vc = vcodec.trim().toLowerCase();
+    if (vc.isEmpty || vc == 'none') return '';
+    if (vc.contains('avc1') || vc.contains('h264')) return 'avc1';
+    if (vc.contains('vp9') || vc.contains('vp09')) return 'vp9';
+    if (vc.contains('av01') || vc.contains('av1')) return 'av01';
+    return '';
+  }
+
   static VideoFormatOption? pickInnerTubeFormat(
     YouTubeStreamInfo info,
-    int preferredHeight,
-  ) {
+    int preferredHeight, {
+    String? preferredFormatId,
+    String? preferredVcodec,
+  }) {
     final direct = info.videoFormats
         .where((f) => f.isDirectTurboSupported && !isManifestUrl(f.videoUrl, protocol: f.protocol))
         .toList(growable: false);
     if (direct.isEmpty) return null;
+    final targetId = (preferredFormatId ?? '').trim();
+    if (targetId.isNotEmpty) {
+      for (final f in direct) {
+        if (f.formatId == targetId) return f;
+      }
+    }
+    final targetCodec = codecFamilyOf(preferredVcodec ?? '');
+    if (targetCodec.isNotEmpty && preferredHeight > 0) {
+      for (final f in direct) {
+        if (f.height == preferredHeight && codecFamilyOf(f.vcodec) == targetCodec) {
+          return f;
+        }
+      }
+      for (final f in direct) {
+        if (f.height > 0 && f.height <= preferredHeight && codecFamilyOf(f.vcodec) == targetCodec) {
+          return f;
+        }
+      }
+    }
     if (preferredHeight > 0) {
       for (final f in direct) {
         if (f.height > 0 && f.height <= preferredHeight) return f;
       }
     }
     return direct.first;
+  }
+
+  static int resolveCompletedFileBytes(String filePath, {int fallbackBytes = 0}) {
+    try {
+      final f = File(filePath);
+      if (f.existsSync()) {
+        final len = f.lengthSync();
+        if (len > 0) return len;
+      }
+    } catch (_) {}
+    return fallbackBytes > 0 ? fallbackBytes : 0;
+  }
+
+  static EngineProgressSnapshot combineDualStreamSnapshot(
+    EngineProgressSnapshot snap, {
+    required bool isAudioStage,
+    required int estimatedAudioBytes,
+    int completedVideoBytes = 0,
+  }) {
+    final safeAudioEst = math.max(0, estimatedAudioBytes);
+    final safeVideoDone = math.max(0, completedVideoBytes);
+    final int combinedTotal;
+    final int combinedDownloaded;
+    if (!isAudioStage) {
+      combinedTotal = snap.totalBytes > 0 ? snap.totalBytes + safeAudioEst : 0;
+      combinedDownloaded = snap.downloadedBytes;
+    } else {
+      final audioTotal = snap.totalBytes > 0 ? snap.totalBytes : safeAudioEst;
+      combinedTotal = safeVideoDone + audioTotal;
+      combinedDownloaded = safeVideoDone + snap.downloadedBytes;
+    }
+    return EngineProgressSnapshot(
+      downloadedBytes: combinedDownloaded,
+      totalBytes: combinedTotal,
+      speedBytesPerSec: snap.speedBytesPerSec,
+      etaSeconds: snap.etaSeconds,
+      activeWorkers: snap.activeWorkers,
+      status: snap.status,
+      chunks: snap.chunks,
+    );
   }
 
   static AudioTrack? matchAudioTrack(
