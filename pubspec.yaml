@@ -1,7 +1,7 @@
 name: faqih_downloader_mobile
 description: "Faqih Downloader (FD) - Mobile Android Port"
 publish_to: 'none'
-version: 0.0.2+2
+version: 0.0.3+3
 
 environment:
   sdk: ^3.10.1

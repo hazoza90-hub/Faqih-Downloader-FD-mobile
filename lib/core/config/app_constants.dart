@@ -2,7 +2,7 @@
 abstract final class AppConstants {
   static const String appName = 'Faqih Downloader (FD)';
   static const String appShortName = 'Faqih Downloader';
-  static const String appVersion = '0.0.2';
+  static const String appVersion = '0.0.3';
   static const String githubRepoSlug = 'hazoza90-hub/Faqih-Downloader-FD-mobile';
 
   static const int minConnections = 1;

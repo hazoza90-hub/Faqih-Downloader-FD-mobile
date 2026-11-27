@@ -58,7 +58,7 @@ void main() {
 
   group('GitHubReleaseUpdater', () {
     test('compares SemVer tags accurately with v prefix and pre-release suffixes', () {
-      expect(AppConstants.appVersion, '0.0.2');
+      expect(AppConstants.appVersion, '0.0.3');
       expect(GitHubReleaseUpdater.isNewerVersion('v2.0.3', '2.0.2'), isTrue);
       expect(GitHubReleaseUpdater.isNewerVersion('v2.1.0', '2.0.9'), isTrue);
       expect(GitHubReleaseUpdater.isNewerVersion('v2.0.2', '2.0.2-beta.1'), isTrue);
