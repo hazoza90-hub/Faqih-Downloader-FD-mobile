@@ -18,6 +18,36 @@ abstract final class HtmlCandidateParser {
     '.flac', '.wav', '.bin',
   };
 
+  static String? rewriteKnownDirectHostUrl(Uri uri) {
+    final host = uri.host.trim().toLowerCase();
+    final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList(growable: false);
+    if (host == 'drive.google.com') {
+      String? fileId;
+      if (segs.length >= 3 && segs[0] == 'file' && segs[1] == 'd') {
+        fileId = segs[2];
+      } else if (segs.length == 1 && segs[0] == 'open') {
+        fileId = uri.queryParameters['id']?.trim();
+      }
+      if (fileId != null && fileId.isNotEmpty) {
+        return 'https://drive.usercontent.google.com/download'
+            '?id=${Uri.encodeQueryComponent(fileId)}&export=download&confirm=t';
+      }
+    }
+    if ((host == 'dropbox.com' || host.endsWith('.dropbox.com')) && segs.isNotEmpty) {
+      if (uri.queryParameters['dl'] != '1') {
+        final nextParams = <String, String>{...uri.queryParameters, 'dl': '1'};
+        return uri.replace(queryParameters: nextParams).toString();
+      }
+    }
+    if (host == 'github.com' && segs.length >= 5 && segs[2] == 'blob') {
+      final owner = segs[0];
+      final repo = segs[1];
+      final rest = segs.sublist(3).join('/');
+      return 'https://raw.githubusercontent.com/$owner/$repo/$rest';
+    }
+    return null;
+  }
+
   static bool isPrivateOrLoopbackHost(String hostname) {
     var h = hostname.trim().toLowerCase();
     if (h.startsWith('[') && h.endsWith(']')) {

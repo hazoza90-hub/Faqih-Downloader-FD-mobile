@@ -37,8 +37,8 @@ class MediaExtractorService {
   Future<bool>? _inFlightAutoUpdate;
 
   static const List<String> _ytFallbackStrategies = <String>[
-    'youtube:player_client=ios,mweb',
     '',
+    'youtube:player_client=ios',
   ];
 
   void _throwIfCancelled(String processId) {
@@ -111,7 +111,11 @@ class MediaExtractorService {
       }
 
       if (UrlDetector.isTikTokUrl(cleanUrl)) {
-        final fastTikTok = await _tiktokFallback.extract(cleanUrl);
+        final fastTikTok = await _tiktokFallback.extract(
+          cleanUrl,
+          onRegisterAbort: (aborter) => _activeAborters[effectiveId] = aborter,
+        );
+        _activeAborters.remove(effectiveId);
         _throwIfCancelled(effectiveId);
         if (fastTikTok != null && _hasUsableStreams(fastTikTok)) {
           _writeCache(cacheKey, fastTikTok);

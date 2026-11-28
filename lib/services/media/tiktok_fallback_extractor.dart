@@ -13,7 +13,7 @@ class TikTokFallbackExtractor {
     HttpClient Function()? httpClientFactory,
     FormatRanker ranker = const FormatRanker(),
     String tikwmBaseUrl = 'https://www.tikwm.com',
-    this.timeout = const Duration(seconds: 20),
+    this.timeout = const Duration(seconds: 8),
   })  : _clientFactory = httpClientFactory ??
             (() => HttpClientFactory.create(connectionTimeout: timeout)),
         _ranker = ranker,
@@ -27,15 +27,41 @@ class TikTokFallbackExtractor {
   final String _tikwmBaseUrl;
   final Duration timeout;
 
-  Future<YouTubeStreamInfo?> extract(String url) async {
-    final direct = await _extractDirect(url);
+  Future<YouTubeStreamInfo?> extract(
+    String url, {
+    void Function(void Function() aborter)? onRegisterAbort,
+  }) async {
+    HttpClient? activeClient;
+    var aborted = false;
+    onRegisterAbort?.call(() {
+      aborted = true;
+      activeClient?.close(force: true);
+    });
+    final direct = await _extractDirect(
+      url,
+      isAborted: () => aborted,
+      setActiveClient: (c) => activeClient = c,
+    );
+    if (aborted) return null;
     if (direct != null) return direct;
-    return _extractViaTikwm(url);
+    return _extractViaTikwm(
+      url,
+      isAborted: () => aborted,
+      setActiveClient: (c) => activeClient = c,
+    );
   }
 
-  Future<YouTubeStreamInfo?> _extractDirect(String url) async {
-    final page = await _fetchPageWithCookies(url);
-    if (page == null || page.html.isEmpty) return null;
+  Future<YouTubeStreamInfo?> _extractDirect(
+    String url, {
+    required bool Function() isAborted,
+    required void Function(HttpClient? client) setActiveClient,
+  }) async {
+    final page = await _fetchPageWithCookies(
+      url,
+      isAborted: isAborted,
+      setActiveClient: setActiveClient,
+    );
+    if (isAborted() || page == null || page.html.isEmpty) return null;
 
     final stateJson = TikTokStateParser.extractEmbeddedStateJson(page.html);
     if (stateJson == null) return null;
@@ -81,8 +107,14 @@ class TikTokFallbackExtractor {
     return _ranker.parse(raw, fallbackUrl: page.finalUrl);
   }
 
-  Future<YouTubeStreamInfo?> _extractViaTikwm(String url) async {
+  Future<YouTubeStreamInfo?> _extractViaTikwm(
+    String url, {
+    required bool Function() isAborted,
+    required void Function(HttpClient? client) setActiveClient,
+  }) async {
+    if (isAborted()) return null;
     final client = _clientFactory()..connectionTimeout = timeout;
+    setActiveClient(client);
     try {
       final apiUri = Uri.parse(
         '$_tikwmBaseUrl/api/?url=${Uri.encodeQueryComponent(url)}&hd=1',
@@ -91,11 +123,16 @@ class TikTokFallbackExtractor {
       req.headers.set(HttpHeaders.userAgentHeader, _chromeUa);
       req.headers.set(HttpHeaders.acceptHeader, 'application/json');
       final resp = await req.close().timeout(timeout);
+      if (isAborted()) {
+        await resp.drain<void>().catchError((_) {});
+        return null;
+      }
       if (resp.statusCode < 200 || resp.statusCode >= 400) {
         await resp.drain<void>();
         return null;
       }
       final body = await _readBoundedUtf8(resp, 1024 * 1024);
+      if (isAborted()) return null;
       final decoded = jsonDecode(body);
       if (decoded is! Map || decoded['code'] != 0) return null;
       final data = TikTokStateParser.asStringMap(decoded['data']);
@@ -133,11 +170,17 @@ class TikTokFallbackExtractor {
     } catch (_) {
       return null;
     } finally {
+      setActiveClient(null);
       client.close(force: true);
     }
   }
 
-  Future<_FetchedTikTokPage?> _fetchPageWithCookies(String rawUrl) async {
+  Future<_FetchedTikTokPage?> _fetchPageWithCookies(
+    String rawUrl, {
+    required bool Function() isAborted,
+    required void Function(HttpClient? client) setActiveClient,
+  }) async {
+    if (isAborted()) return null;
     var current = Uri.tryParse(rawUrl.trim());
     if (current == null ||
         (current.scheme != 'http' && current.scheme != 'https')) {
@@ -145,8 +188,10 @@ class TikTokFallbackExtractor {
     }
     final cookies = <String, String>{};
     final client = _clientFactory()..connectionTimeout = timeout;
+    setActiveClient(client);
     try {
       for (var hop = 0; hop < 8; hop++) {
+        if (isAborted()) return null;
         final req = await client.getUrl(current!).timeout(timeout);
         req.followRedirects = false;
         req.headers.set(HttpHeaders.userAgentHeader, _chromeUa);
@@ -159,6 +204,10 @@ class TikTokFallbackExtractor {
           );
         }
         final resp = await req.close().timeout(timeout);
+        if (isAborted()) {
+          await resp.drain<void>().catchError((_) {});
+          return null;
+        }
         for (final c in resp.cookies) {
           cookies[c.name] = c.value;
         }
@@ -187,6 +236,7 @@ class TikTokFallbackExtractor {
     } catch (_) {
       return null;
     } finally {
+      setActiveClient(null);
       client.close(force: true);
     }
   }

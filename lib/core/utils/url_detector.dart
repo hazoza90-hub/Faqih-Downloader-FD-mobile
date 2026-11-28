@@ -1,7 +1,12 @@
 final RegExp _youtubeRegex = RegExp(
   r'^(?:https?://)?(?:www\.|m\.|music\.)?'
-  r'(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|v/|live/)|youtu\.be/)'
+  r'(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|v/|live/)|youtube-nocookie\.com/embed/|youtu\.be/)'
   r'([a-zA-Z0-9_-]{11})(?:[/?#&]|$)',
+  caseSensitive: false,
+);
+
+final RegExp _youtubeClipRegex = RegExp(
+  r'^(?:https?://)?(?:www\.|m\.)?youtube\.com/clip/[a-zA-Z0-9_-]+(?:[/?#&]|$)',
   caseSensitive: false,
 );
 
@@ -20,11 +25,11 @@ final Map<String, RegExp> _socialMediaPatterns = <String, RegExp>{
     caseSensitive: false,
   ),
   'facebook': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:fb\.watch|fb\.me)/[a-zA-Z0-9_.-]+/?|^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?facebook\.com/(?:watch/?(?:\?|$)|reel/\d+|reels/\d+|share/[vr]/[a-zA-Z0-9_-]+|[^/?#]+/videos/\d+|(?:video|story)\.php\?(?:.*&)?(?:v|story_fbid)=\d+)',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:fb\.watch|fb\.me)/[a-zA-Z0-9_.-]+/?|^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?facebook\.com/(?:watch/?(?:\?|$)|reel/\d+|reels/\d+|videos/\d+|permalink\.php\?|share/(?:[vrp]/[a-zA-Z0-9_.-]+|[a-zA-Z0-9_.-]+)|groups/[^/?#]+/(?:posts|permalink)/\d+|[^/?#]+/videos/\d+|(?:video|story)\.php\?(?:.*&)?(?:v|story_fbid)=\d+)',
     caseSensitive: false,
   ),
   'twitter': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:twitter\.com|x\.com)/(?:i(?:/web)?/status|[^/?#]+/status)/\d+',
+    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?(?:twitter\.com|x\.com|fxtwitter\.com|vxtwitter\.com)/(?:i(?:/web)?/status|i/broadcasts|[^/?#]+/status)/[a-zA-Z0-9_-]+',
     caseSensitive: false,
   ),
   'reddit': RegExp(
@@ -44,7 +49,7 @@ final Map<String, RegExp> _socialMediaPatterns = <String, RegExp>{
     caseSensitive: false,
   ),
   'threads': RegExp(
-    r'^(?:https?://)?(?:www\.)?threads\.net/@?[^/?#]+/post/[a-zA-Z0-9_-]+',
+    r'^(?:https?://)?(?:www\.)?threads\.(?:net|com)/@?[^/?#]+/post/[a-zA-Z0-9_-]+',
     caseSensitive: false,
   ),
   'snapchat': RegExp(
@@ -52,11 +57,51 @@ final Map<String, RegExp> _socialMediaPatterns = <String, RegExp>{
     caseSensitive: false,
   ),
   'twitch': RegExp(
-    r'^(?:https?://)?(?:[a-zA-Z0-9-]+\.)?twitch\.tv/(?:videos/\d+|clips/[a-zA-Z0-9_-]+)',
+    r'^(?:https?://)?(?:clips\.twitch\.tv/[a-zA-Z0-9_-]+|(?:[a-zA-Z0-9-]+\.)?twitch\.tv/(?:videos/\d+|clips/[a-zA-Z0-9_-]+|[^/?#]+/clip/[a-zA-Z0-9_-]+))',
     caseSensitive: false,
   ),
   'rumble': RegExp(
     r'^(?:https?://)?(?:www\.)?rumble\.com/v[a-zA-Z0-9_-]+',
+    caseSensitive: false,
+  ),
+  'soundcloud': RegExp(
+    r'^(?:https?://)?(?:(?:www\.|m\.)?soundcloud\.com/[^/?#\s]+/[^/?#\s]+|on\.soundcloud\.com/[a-zA-Z0-9_-]+)',
+    caseSensitive: false,
+  ),
+  'bilibili': RegExp(
+    r'^(?:https?://)?(?:(?:www\.|m\.)?bilibili\.com/video/[a-zA-Z0-9_-]+|b23\.tv/[a-zA-Z0-9_-]+)',
+    caseSensitive: false,
+  ),
+  'vk': RegExp(
+    r'^(?:https?://)?(?:(?:www\.|m\.)?vk\.com/(?:video|clip)-?\d+_\d+|vkvideo\.ru/video-?\d+_\d+)',
+    caseSensitive: false,
+  ),
+  'kick': RegExp(
+    r'^(?:https?://)?(?:www\.)?kick\.com/[^/?#\s]+(?:/videos/[a-zA-Z0-9_-]+|/clips/[a-zA-Z0-9_-]+|\?clip=[a-zA-Z0-9_-]+)?',
+    caseSensitive: false,
+  ),
+  'streamable': RegExp(
+    r'^(?:https?://)?(?:www\.)?streamable\.com/[a-zA-Z0-9_-]+',
+    caseSensitive: false,
+  ),
+  'okru': RegExp(
+    r'^(?:https?://)?(?:www\.|m\.)?(?:ok\.ru|odnoklassniki\.ru)/video/\d+',
+    caseSensitive: false,
+  ),
+  'likee': RegExp(
+    r'^(?:https?://)?(?:www\.)?(?:likee\.video|l\.likee\.video)/[^/?#\s]+',
+    caseSensitive: false,
+  ),
+  'ted': RegExp(
+    r'^(?:https?://)?(?:www\.)?ted\.com/talks/[a-zA-Z0-9_-]+',
+    caseSensitive: false,
+  ),
+  'odysee': RegExp(
+    r'^(?:https?://)?(?:www\.)?odysee\.com/[^/?#\s]+(?:/[^/?#\s]+)?',
+    caseSensitive: false,
+  ),
+  'bandcamp': RegExp(
+    r'^(?:https?://)?[a-zA-Z0-9-]+\.bandcamp\.com/(?:track|album)/[a-zA-Z0-9_-]+',
     caseSensitive: false,
   ),
 };
@@ -74,6 +119,16 @@ const Map<String, String> _platformDisplayNames = <String, String>{
   'snapchat': 'Snapchat',
   'twitch': 'Twitch',
   'rumble': 'Rumble',
+  'soundcloud': 'SoundCloud',
+  'bilibili': 'Bilibili',
+  'vk': 'VK',
+  'kick': 'Kick',
+  'streamable': 'Streamable',
+  'okru': 'OK.ru',
+  'likee': 'Likee',
+  'ted': 'TED',
+  'odysee': 'Odysee',
+  'bandcamp': 'Bandcamp',
 };
 
 bool isHttpUrl(String url) {
@@ -101,7 +156,9 @@ bool isYouTubeUrl(String url) {
   if (trimmed.isEmpty) {
     return false;
   }
-  return _youtubeRegex.hasMatch(trimmed) || _youtubePlaylistRegex.hasMatch(trimmed);
+  return _youtubeRegex.hasMatch(trimmed) ||
+      _youtubeClipRegex.hasMatch(trimmed) ||
+      _youtubePlaylistRegex.hasMatch(trimmed);
 }
 
 bool isSocialMediaUrl(String url) {

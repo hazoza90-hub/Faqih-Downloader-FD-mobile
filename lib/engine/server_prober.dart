@@ -170,12 +170,15 @@ class ServerProber {
     Map<String, String> headers,
   ) async {
     try {
+      final headTimeout = timeout < const Duration(seconds: 8)
+          ? timeout
+          : const Duration(seconds: 8);
       final redir = await HttpClientFactory.openWithCookieRedirects(
         client: client,
         method: 'HEAD',
         uri: uri,
         headers: headers,
-        timeout: timeout,
+        timeout: headTimeout,
       );
       final resp = redir.response;
       await resp.drain<void>();

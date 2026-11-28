@@ -44,6 +44,27 @@ class YtDlpStreamDownloader {
         lastTotalBytes: lastTotalBytes,
       );
 
+  static List<String> buildSafeHeaders(
+    Map<String, String> headers, {
+    required bool isYouTube,
+    required bool hasCookieFile,
+  }) {
+    const blocked = <String>{
+      'host',
+      'content-length',
+      'accept-encoding',
+      'range',
+      'connection',
+    };
+    return <String>[
+      for (final e in headers.entries)
+        if (!blocked.contains(e.key.trim().toLowerCase()) &&
+            !(isYouTube && e.key.trim().toLowerCase() == 'user-agent') &&
+            !(hasCookieFile && e.key.trim().toLowerCase() == 'cookie'))
+          '${e.key}:${e.value}',
+    ];
+  }
+
   static String mergeOutputFormatFor(VideoFormatOption? fmt) =>
       YtDlpProgressParser.mergeOutputFormatFor(fmt);
 
@@ -147,11 +168,6 @@ class YtDlpStreamDownloader {
       strictHeight: isYt && (formatOption?.height ?? 0) >= 480,
     );
     final rawCookie = request.cookiesFile?.trim() ?? '';
-    final headerList = <String>[
-      for (final e in request.headers.entries)
-        if (!isYt || e.key.trim().toLowerCase() != 'user-agent')
-          '${e.key}:${e.value}',
-    ];
     final attempts = isYt
         ? <({String? strategy, String? cookie})>[
             (strategy: 'youtube:player_client=android_vr,ios', cookie: null),
@@ -183,14 +199,19 @@ class YtDlpStreamDownloader {
         lastProgress = 0.0;
         lastSampleAt = DateTime.now();
         final attemptCookie = attempt.cookie;
+        final hasCookieFile = attemptCookie != null && attemptCookie.isNotEmpty;
+        final headerList = buildSafeHeaders(
+          request.headers,
+          isYouTube: isYt,
+          hasCookieFile: hasCookieFile,
+        );
         final opts = <String, Object?>{
           '-f': formatSpec,
           '-o': p.join(jobDir, 'ytdlp_%(id)s.%(ext)s'),
           '--no-playlist': true,
           if (!request.audioOnly)
             '--merge-output-format': mergeOutputFormatFor(formatOption),
-          if (attemptCookie != null && attemptCookie.isNotEmpty)
-            '--cookies': attemptCookie,
+          if (hasCookieFile) '--cookies': attemptCookie,
           if (headerList.isNotEmpty) '--add-header': headerList,
         };
         try {
@@ -305,7 +326,7 @@ class YtDlpStreamDownloader {
       final family = MediaStreamHelpers.codecFamilyOf(fmt.vcodec);
       final String hFallback;
       if (strictHeight && fmt.height >= 480) {
-        final minH = (fmt.height * 0.85).round();
+        final minH = MediaStreamHelpers.minAcceptableHeightFor(fmt.height);
         final range = '[height>=$minH][height<=${fmt.height}]';
         hFallback = family.isNotEmpty
             ? 'bestvideo$range[vcodec^=$family]+bestaudio/bestvideo$range+bestaudio/best$range'

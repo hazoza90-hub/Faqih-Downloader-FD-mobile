@@ -208,6 +208,7 @@ void main() {
               height: 720,
               vcodec: 'avc1.4d401f',
               videoUrl: 'https://stale.example.com/720.mp4',
+              audioUrl: 'https://stale.example.com/aud.m4a',
             ),
           ),
           jobDir: jobDir,
@@ -226,7 +227,7 @@ void main() {
       });
     });
 
-    test('2) YtDlpStreamDownloader.buildSelector with strictHeight bounds >=612..720 without open 360p fallback', () {
+    test('2) YtDlpStreamDownloader.buildSelector with strictHeight bounds >=520..720 without open 360p fallback', () {
       final strictWithCodec = YtDlpStreamDownloader.buildSelector(
         const DownloadJobRequest(id: 's1', url: 'https://youtube.com/watch?v=dQw4w9WgXcQ', title: 'T'),
         const VideoFormatOption(formatId: '136', resolutionLabel: '720p', height: 720, vcodec: 'avc1.4d401f'),
@@ -235,8 +236,8 @@ void main() {
       );
       expect(
         strictWithCodec,
-        '136+bestaudio/bestvideo[height>=612][height<=720][vcodec^=avc1]+bestaudio/'
-        'bestvideo[height>=612][height<=720]+bestaudio/best[height>=612][height<=720]',
+        '136+bestaudio/bestvideo[height>=520][height<=720][vcodec^=avc1]+bestaudio/'
+        'bestvideo[height>=520][height<=720]+bestaudio/best[height>=520][height<=720]',
       );
       expect(strictWithCodec.contains('/best[height<=720]/best'), isFalse);
 
@@ -248,7 +249,7 @@ void main() {
       );
       expect(
         strictNoCodec,
-        '22/bestvideo[height>=612][height<=720]+bestaudio/best[height>=612][height<=720]',
+        '22/bestvideo[height>=520][height<=720]+bestaudio/best[height>=520][height<=720]',
       );
       expect(strictNoCodec.contains('/best[height<=720]/best'), isFalse);
     });
@@ -312,7 +313,7 @@ void main() {
         null,
         '/tmp/yt_cookies.txt',
       ]);
-      expect(seenArgs.first.format, contains('height>=612'));
+      expect(seenArgs.first.format, contains('height>=520'));
       expect(seenArgs.first.format.toString().contains('/best[height<=720]/best'), isFalse);
     });
 

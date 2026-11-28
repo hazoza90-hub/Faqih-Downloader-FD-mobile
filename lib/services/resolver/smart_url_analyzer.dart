@@ -59,6 +59,9 @@ class SmartUrlAnalyzer {
       return UrlAnalysisResult(url: url, mediaInfo: info);
     } on MediaExtractionException catch (e) {
       if (e.kind == MediaErrorKind.cancelled) rethrow;
+      if (e.kind == MediaErrorKind.unsupportedUrl && resolverError != null) {
+        throw resolverError;
+      }
       if (resolved != null && resolved.isHtmlLanding) {
         throw MediaExtractionException(
           kind: e.kind,

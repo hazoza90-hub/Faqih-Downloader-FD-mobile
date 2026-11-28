@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/models/subtitle_track.dart';
+import '../../engine/http_client_factory.dart';
 
 /// Downloads, normalizes VTT->SRT, deduplicates rolling captions, prepares RTL Arabic text,
 /// and escapes paths for native FFmpeg subtitle filters.
@@ -53,16 +54,23 @@ class SubtitleProcessor {
     }
 
     final uri = Uri.parse(track.url.trim());
-    final client = (_httpClientFactory ?? HttpClient.new)();
+    final client = (_httpClientFactory ??
+        () => HttpClientFactory.create(
+              connectionTimeout: const Duration(seconds: 15),
+            ))();
     try {
       client.connectionTimeout = const Duration(seconds: 15);
-      final req = await client.getUrl(uri);
-      headers.forEach((k, v) {
-        if (k.trim().isNotEmpty) req.headers.set(k, v);
-      });
-      final res = await req.close();
+      final redir = await HttpClientFactory.openWithCookieRedirects(
+        client: client,
+        method: 'GET',
+        uri: uri,
+        headers: headers,
+        timeout: const Duration(seconds: 15),
+      );
+      final res = redir.response;
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw HttpException('Subtitle HTTP ${res.statusCode}', uri: uri);
+        await res.drain<void>().catchError((_) {});
+        throw HttpException('Subtitle HTTP ${res.statusCode}', uri: redir.finalUri);
       }
       final chunks = await res.fold<List<int>>(<int>[], (acc, b) => acc..addAll(b));
       return utf8.decode(chunks, allowMalformed: true);

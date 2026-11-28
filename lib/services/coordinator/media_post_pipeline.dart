@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../core/models/clip_range.dart';
 import '../media/ffmpeg_media_processor.dart';
 import '../media/media_exceptions.dart';
 import '../media/subtitle_font_provisioner.dart';
@@ -129,6 +130,10 @@ class MediaPostPipeline {
       } finally {
         onTrackProcess(null);
       }
+      if (File(currentPath).existsSync() && File(currentPath).lengthSync() > 0) {
+        _safeDeleteRaw(rawVideoPath, currentPath);
+        _safeDeleteRaw(rawAudioPath, currentPath);
+      }
       remuxedByFfmpeg = true;
       _checkCancelled(isCancelled);
     }
@@ -173,36 +178,56 @@ class MediaPostPipeline {
     }
 
     if (hasClip) {
-      final clipOut = p.join(jobDir, 'stage_clip.$videoExt');
-      final pid = '${request.id}_clip';
-      onTrackProcess(pid);
-      currentPath = await ffmpeg.clipMedia(
+      currentPath = await _clipWithFallback(
         inputPath: currentPath,
-        outputPath: clipOut,
+        outputPath: p.join(jobDir, 'stage_clip.$videoExt'),
         clipRange: clipRange,
-        processId: pid,
-        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        processId: '${request.id}_clip',
+        isCancelled: isCancelled,
+        onPhase: onPhase,
+        onTrackProcess: onTrackProcess,
       );
-      onTrackProcess(null);
       remuxedByFfmpeg = true;
       _checkCancelled(isCancelled);
     }
 
     if (subPath != null && request.subtitleMode == SubtitleMode.softMux) {
-      final softExt = videoExt == 'mkv' ? 'mkv' : 'mp4';
-      final softOut = p.join(jobDir, 'stage_softsub.$softExt');
+      var softExt = videoExt == 'mkv' ? 'mkv' : 'mp4';
+      var softOut = p.join(jobDir, 'stage_softsub.$softExt');
       final pid = '${request.id}_softsub';
-      onTrackProcess(pid);
-      currentPath = await ffmpeg.muxSoftSubtitles(
-        videoPath: currentPath,
-        subtitlePath: subPath,
-        outputPath: softOut,
-        languageCode: subTrack!.language,
-        processId: pid,
-        durationSec: durSec,
-        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
-      );
-      onTrackProcess(null);
+      try {
+        onTrackProcess(pid);
+        currentPath = await ffmpeg.muxSoftSubtitles(
+          videoPath: currentPath,
+          subtitlePath: subPath,
+          outputPath: softOut,
+          languageCode: subTrack!.language,
+          processId: pid,
+          durationSec: durSec,
+          onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        );
+      } on MediaProcessingException catch (e) {
+        if (e.kind == MediaErrorKind.cancelled ||
+            isCancelled() ||
+            softExt == 'mkv') {
+          rethrow;
+        }
+        softExt = 'mkv';
+        softOut = p.join(jobDir, 'stage_softsub.mkv');
+        final mkvPid = '${request.id}_softsub_mkv';
+        onTrackProcess(mkvPid);
+        currentPath = await ffmpeg.muxSoftSubtitles(
+          videoPath: currentPath,
+          subtitlePath: subPath,
+          outputPath: softOut,
+          languageCode: subTrack!.language,
+          processId: mkvPid,
+          durationSec: durSec,
+          onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        );
+      } finally {
+        onTrackProcess(null);
+      }
       return MediaPipelineResult(filePath: currentPath, ext: softExt);
     }
 
@@ -244,17 +269,15 @@ class MediaPostPipeline {
 
     final clipRange = request.clipRange;
     if (clipRange != null && clipRange.isActive) {
-      final clipped = p.join(jobDir, 'stage_audio_clip.$targetExt');
-      final pid = '${request.id}_audioclip';
-      onTrackProcess(pid);
-      currentPath = await ffmpeg.clipMedia(
+      currentPath = await _clipWithFallback(
         inputPath: currentPath,
-        outputPath: clipped,
+        outputPath: p.join(jobDir, 'stage_audio_clip.$targetExt'),
         clipRange: clipRange,
-        processId: pid,
-        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+        processId: '${request.id}_audioclip',
+        isCancelled: isCancelled,
+        onPhase: onPhase,
+        onTrackProcess: onTrackProcess,
       );
-      onTrackProcess(null);
     }
 
     if (!File(currentPath).existsSync()) {
@@ -264,6 +287,57 @@ class MediaPostPipeline {
       );
     }
     return MediaPipelineResult(filePath: currentPath, ext: targetExt);
+  }
+
+  Future<String> _clipWithFallback({
+    required String inputPath,
+    required String outputPath,
+    required ClipRange clipRange,
+    required String processId,
+    required bool Function() isCancelled,
+    required void Function(DownloadPhase phase, {double? progress}) onPhase,
+    required void Function(String? processId) onTrackProcess,
+  }) async {
+    try {
+      onTrackProcess(processId);
+      final fastPath = await ffmpeg.clipMedia(
+        inputPath: inputPath,
+        outputPath: outputPath,
+        clipRange: clipRange,
+        accurateReencode: false,
+        processId: processId,
+        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+      );
+      final f = File(fastPath);
+      if (f.existsSync() && f.lengthSync() > 0) return fastPath;
+    } on MediaProcessingException catch (e) {
+      if (e.kind == MediaErrorKind.cancelled || isCancelled()) rethrow;
+    } finally {
+      onTrackProcess(null);
+    }
+    _checkCancelled(isCancelled);
+    final rePid = '${processId}_re';
+    try {
+      onTrackProcess(rePid);
+      return await ffmpeg.clipMedia(
+        inputPath: inputPath,
+        outputPath: outputPath,
+        clipRange: clipRange,
+        accurateReencode: true,
+        processId: rePid,
+        onProgress: (r) => onPhase(DownloadPhase.processingFfmpeg, progress: r),
+      );
+    } finally {
+      onTrackProcess(null);
+    }
+  }
+
+  static void _safeDeleteRaw(String rawPath, String keepPath) {
+    if (rawPath == keepPath || rawPath.isEmpty) return;
+    try {
+      final f = File(rawPath);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
   }
 
   static String _normalizedVideoExt(

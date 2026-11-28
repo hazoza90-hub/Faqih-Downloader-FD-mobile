@@ -53,6 +53,15 @@ abstract final class MediaStreamHelpers {
     return '';
   }
 
+  static int minAcceptableHeightFor(int targetHeight) {
+    if (targetHeight >= 2160) return 1500;
+    if (targetHeight >= 1440) return 1100;
+    if (targetHeight >= 1080) return 780;
+    if (targetHeight >= 720) return 520;
+    if (targetHeight >= 480) return 400;
+    return 0;
+  }
+
   static VideoFormatOption? pickInnerTubeFormat(
     YouTubeStreamInfo info,
     int preferredHeight, {
@@ -61,7 +70,7 @@ abstract final class MediaStreamHelpers {
     bool strictHeight = false,
   }) {
     final minHeight = (strictHeight && preferredHeight > 0)
-        ? (preferredHeight * 0.85).round()
+        ? minAcceptableHeightFor(preferredHeight)
         : 0;
     final direct = info.videoFormats.where((f) {
       if (!f.isDirectTurboSupported ||
@@ -181,9 +190,10 @@ abstract final class MediaStreamHelpers {
     final wantsSeparateAudio = fmt.needsAudioMerge || (audio != null && !audio.isOriginal);
     if (wantsSeparateAudio) {
       final aUrl = (audio?.url.isNotEmpty ?? false) ? audio!.url : (fmt.audioUrl ?? '');
+      if (aUrl.isEmpty) return false;
       final aExt = (audio?.ext ?? fmt.audioExt).trim().toLowerCase();
       if (aExt == 'm3u8' || aExt == 'mpd') return false;
-      if (aUrl.isNotEmpty && isManifestUrl(aUrl, protocol: fmt.protocol)) return false;
+      if (isManifestUrl(aUrl, protocol: fmt.protocol)) return false;
     }
     return true;
   }

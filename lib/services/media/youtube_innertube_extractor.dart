@@ -27,7 +27,7 @@ class YouTubeInnerTubeExtractor {
     FormatRanker ranker = const FormatRanker(),
     HttpClient Function()? httpClientFactory,
     Uri? endpoint,
-    Duration timeout = const Duration(milliseconds: 3500),
+    Duration timeout = const Duration(milliseconds: 7000),
   })  : _ranker = ranker,
         _httpClientFactory = httpClientFactory,
         _endpoint = endpoint ?? _defaultEndpoint,

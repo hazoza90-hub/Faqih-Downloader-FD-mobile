@@ -64,10 +64,14 @@ class HtmlDownloadResolver {
     Map<String, String> headers = const <String, String>{},
     bool probeCandidates = true,
   }) async {
-    final startUri = Uri.tryParse(url.trim());
+    var startUri = Uri.tryParse(url.trim());
     if (startUri == null ||
         !const <String>{'http', 'https'}.contains(startUri.scheme.toLowerCase())) {
       throw ArgumentError('Invalid HTTP URL: $url');
+    }
+    final rewritten = HtmlCandidateParser.rewriteKnownDirectHostUrl(startUri);
+    if (rewritten != null) {
+      startUri = Uri.parse(rewritten);
     }
     final srcIsPublic = !isPrivateOrLoopbackHost(startUri.host);
 

@@ -277,8 +277,8 @@ void main() {
       expect(seenCalls.every((c) => c.timeout == 15), isTrue);
       expect(seenCalls.take(3).map((c) => c.strategy).toList(), <String?>[
         null,
-        'youtube:player_client=ios,mweb',
         '',
+        'youtube:player_client=ios',
       ]);
       expect(seenCalls.take(3).every((c) => c.cookies == null), isTrue);
       expect(seenCalls[3].cookies, '/tmp/cookies.txt');

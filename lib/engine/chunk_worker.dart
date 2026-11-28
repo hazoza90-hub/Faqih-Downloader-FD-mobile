@@ -60,6 +60,7 @@ class ChunkWorker {
     required void Function(void Function() abortCallback) registerAborter,
     required void Function(void Function() abortCallback) unregisterAborter,
     Duration requestTimeout = const Duration(seconds: 20),
+    Duration stallTimeout = const Duration(seconds: 25),
     int maxRetries = 4,
   }) async {
     var chunk = readChunk();
@@ -127,6 +128,7 @@ class ChunkWorker {
             registerAborter: registerAborter,
             unregisterAborter: unregisterAborter,
             requestTimeout: requestTimeout,
+            stallTimeout: stallTimeout,
           );
           chunk = readChunk();
           if (isPaused() || isCancelled()) break;
@@ -199,6 +201,7 @@ class ChunkWorker {
     required void Function(void Function() abortCallback) registerAborter,
     required void Function(void Function() abortCallback) unregisterAborter,
     required Duration requestTimeout,
+    required Duration stallTimeout,
   }) async {
     final snapshot = readChunk();
     final isRanged = supportsRanges && snapshot.endByte >= 0;
@@ -213,17 +216,36 @@ class ChunkWorker {
 
     HttpClientRequest? activeReq;
     StreamSubscription<List<int>>? activeSub;
+    Timer? stallTimer;
     final done = Completer<void>();
 
-    void abort() {
+    void abort([Object? error]) {
+      stallTimer?.cancel();
+      stallTimer = null;
       activeSub?.cancel();
       try {
         activeReq?.abort();
       } catch (_) {}
-      if (!done.isCompleted) done.complete();
+      if (!done.isCompleted) {
+        if (error != null) {
+          done.completeError(error);
+        } else {
+          done.complete();
+        }
+      }
     }
 
-    registerAborter(abort);
+    void resetStallTimer() {
+      stallTimer?.cancel();
+      stallTimer = Timer(stallTimeout, () {
+        if (done.isCompleted || isPaused() || isCancelled()) return;
+        abort(TimeoutException('Chunk stream stalled', stallTimeout));
+      });
+    }
+
+    void abortHandler() => abort();
+
+    registerAborter(abortHandler);
     try {
       final redir = await HttpClientFactory.openWithCookieRedirects(
         client: httpClient,
@@ -240,8 +262,10 @@ class ChunkWorker {
       final resp = redir.response;
       await _validateResponse(resp, isRanged, isGoogleVideo, rangeStart);
 
+      resetStallTimer();
       activeSub = resp.listen(
         (data) async {
+          stallTimer?.cancel();
           activeSub?.pause();
           try {
             final keepReading = await _handlePacket(
@@ -258,6 +282,7 @@ class ChunkWorker {
               await activeSub?.cancel();
               if (!done.isCompleted) done.complete();
             } else {
+              resetStallTimer();
               activeSub?.resume();
             }
           } catch (err, st) {
@@ -275,7 +300,8 @@ class ChunkWorker {
       );
       await done.future;
     } finally {
-      unregisterAborter(abort);
+      stallTimer?.cancel();
+      unregisterAborter(abortHandler);
       await activeSub?.cancel();
     }
   }
