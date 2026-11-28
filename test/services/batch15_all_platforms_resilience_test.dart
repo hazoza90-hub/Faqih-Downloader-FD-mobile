@@ -8,12 +8,15 @@ import 'package:faqih_downloader_mobile/core/models/video_format_option.dart';
 import 'package:faqih_downloader_mobile/core/models/youtube_stream_info.dart';
 import 'package:faqih_downloader_mobile/core/utils/url_detector.dart';
 import 'package:faqih_downloader_mobile/engine/chunk_worker.dart';
+import 'package:faqih_downloader_mobile/engine/isolate_download_runner.dart';
 import 'package:faqih_downloader_mobile/engine/token_bucket_rate_limiter.dart';
 import 'package:faqih_downloader_mobile/platform/channel_names.dart';
+import 'package:faqih_downloader_mobile/platform/media_store_channel.dart';
 import 'package:faqih_downloader_mobile/platform/youtube_dl_channel.dart';
 import 'package:faqih_downloader_mobile/services/coordinator/download_job_models.dart';
 import 'package:faqih_downloader_mobile/services/coordinator/media_post_pipeline.dart';
 import 'package:faqih_downloader_mobile/services/coordinator/media_stream_helpers.dart';
+import 'package:faqih_downloader_mobile/services/coordinator/stream_download_coordinator.dart';
 import 'package:faqih_downloader_mobile/services/coordinator/ytdlp_stream_downloader.dart';
 import 'package:faqih_downloader_mobile/services/media/ffmpeg_media_processor.dart';
 import 'package:faqih_downloader_mobile/services/media/media_exceptions.dart';
@@ -29,6 +32,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 class _RealHttpOverrides extends HttpOverrides {}
+
+class _CaptureTurboRunner extends IsolateDownloadRunner {
+  _CaptureTurboRunner({
+    required super.url,
+    required super.destinationPath,
+    super.headers,
+    super.maxConnections,
+    super.speedLimitBytesPerSec,
+    super.callbacks,
+    required this.onStartUrl,
+  });
+
+  final void Function(String) onStartUrl;
+  final Completer<void> _done = Completer<void>();
+
+  @override
+  Future<void> get completion => _done.future;
+
+  @override
+  Future<void> start() async {
+    try {
+      onStartUrl(url);
+      await File(destinationPath).parent.create(recursive: true);
+      await File(destinationPath).writeAsBytes(const <int>[1, 2, 3, 4], flush: true);
+      callbacks?.onComplete?.call(destinationPath, 4, 0.01);
+    } finally {
+      if (!_done.isCompleted) _done.complete();
+    }
+  }
+}
 
 class _ThrowingUnsupportedExtractor extends MediaExtractorService {
   _ThrowingUnsupportedExtractor({required super.channel});
@@ -114,6 +147,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const ytdlMethod = MethodChannel(ChannelNames.youtubeDl);
   const ytdlEvents = EventChannel(ChannelNames.youtubeDlEvents);
+  const mediaStoreMethod = MethodChannel(ChannelNames.mediaStore);
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   late Directory tempDir;
 
@@ -124,6 +158,7 @@ void main() {
 
   tearDown(() async {
     messenger.setMockMethodCallHandler(ytdlMethod, null);
+    messenger.setMockMethodCallHandler(mediaStoreMethod, null);
     messenger.setMockStreamHandler(ytdlEvents, null);
     if (tempDir.existsSync()) await tempDir.delete(recursive: true);
   });
@@ -421,6 +456,71 @@ void main() {
           throwsA(isA<HttpException>()),
         );
       });
+    });
+
+    test('5b) SmartUrlAnalyzer & StreamDownloadCoordinator apply direct-host rewrites and encode GitHub paths', () async {
+      final analyzer = SmartUrlAnalyzer(
+        extractor: _ThrowingUnsupportedExtractor(
+          channel: YoutubeDlChannel(methodChannel: ytdlMethod, eventChannel: ytdlEvents),
+        ),
+      );
+
+      final dropboxRes = await analyzer.analyze(
+        'https://www.dropbox.com/s/abc123/test.zip?dl=0',
+        processId: 'p_dropbox',
+      );
+      expect(dropboxRes.url, 'https://www.dropbox.com/s/abc123/test.zip?dl=1');
+
+      final githubRes = await analyzer.analyze(
+        'https://github.com/owner/repo/blob/main/my%20dir/file%231.zip',
+        processId: 'p_github',
+      );
+      expect(
+        githubRes.url,
+        'https://raw.githubusercontent.com/owner/repo/main/my%20dir/file%231.zip',
+      );
+
+      messenger.setMockMethodCallHandler(mediaStoreMethod, (call) async {
+        if (call.method == 'getAppWorkDir') return tempDir.path;
+        if (call.method == 'exportToDownloads') {
+          return <String, Object?>{
+            'uri': 'content://media/external/downloads/905',
+            'displayPath': 'Download/FaqihDownloader/Archives/tool.zip',
+            'sizeBytes': 4,
+          };
+        }
+        return null;
+      });
+
+      String? capturedUrl;
+      final coord = StreamDownloadCoordinator(
+        request: const DownloadJobRequest(
+          id: 'b15_gh_direct',
+          url: 'https://github.com/owner/repo/blob/main/dir/tool.zip',
+          title: 'Tool Archive',
+        ),
+        mediaStoreChannel: MediaStoreChannel(methodChannel: mediaStoreMethod),
+        runnerFactory: ({
+          required url,
+          required destinationPath,
+          headers = const <String, String>{},
+          maxConnections = 8,
+          speedLimitBytesPerSec = 0.0,
+          callbacks,
+        }) =>
+            _CaptureTurboRunner(
+              url: url,
+              destinationPath: destinationPath,
+              headers: headers,
+              maxConnections: maxConnections,
+              speedLimitBytesPerSec: speedLimitBytesPerSec,
+              callbacks: callbacks,
+              onStartUrl: (u) => capturedUrl = u,
+            ),
+      );
+
+      await coord.start();
+      expect(capturedUrl, 'https://raw.githubusercontent.com/owner/repo/main/dir/tool.zip');
     });
 
     test('6) MediaPostPipeline cleans raw streams, falls back softsub->mkv and clip->reencode, and SubtitleProcessor follows redirects', () async {

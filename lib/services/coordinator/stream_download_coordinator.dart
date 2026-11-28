@@ -15,6 +15,7 @@ import '../history/history_manager.dart';
 import '../media/ffmpeg_media_processor.dart';
 import '../media/subtitle_font_provisioner.dart';
 import '../media/subtitle_processor.dart';
+import '../resolver/html_candidate_parser.dart';
 import '../resolver/html_download_resolver.dart';
 import 'download_job_models.dart';
 import 'job_export_helper.dart';
@@ -221,18 +222,19 @@ class StreamDownloadCoordinator {
     String jobDir,
     MediaStreamAcquirer acquirer,
   ) async {
+    final targetUrl = HtmlCandidateParser.normalizeDirectUrl(request.url);
     final skipResolve =
-        request.skipHtmlResolve || UrlDetector.isDirectDownloadUrl(request.url);
+        request.skipHtmlResolve || UrlDetector.isDirectDownloadUrl(targetUrl);
     final resolved = (!skipResolve && (_hasCustomResolver || !_hasCustomRunner))
         ? await CoordinatorHelpers.resolveDirectTarget(
             _htmlResolver,
-            url: request.url,
+            url: targetUrl,
             headers: request.headers,
           )
         : null;
 
     final effectiveUrl =
-        (resolved != null && resolved.url.isNotEmpty) ? resolved.url : request.url;
+        (resolved != null && resolved.url.isNotEmpty) ? resolved.url : targetUrl;
     final effectiveHeaders = resolved != null && resolved.headers.isNotEmpty
         ? <String, String>{...request.headers, ...resolved.headers}
         : request.headers;

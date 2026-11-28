@@ -42,10 +42,20 @@ abstract final class HtmlCandidateParser {
     if (host == 'github.com' && segs.length >= 5 && segs[2] == 'blob') {
       final owner = segs[0];
       final repo = segs[1];
-      final rest = segs.sublist(3).join('/');
-      return 'https://raw.githubusercontent.com/$owner/$repo/$rest';
+      return Uri(
+        scheme: 'https',
+        host: 'raw.githubusercontent.com',
+        pathSegments: <String>[owner, repo, ...segs.sublist(3)],
+      ).toString();
     }
     return null;
+  }
+
+  static String normalizeDirectUrl(String url) {
+    final trimmed = url.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null) return trimmed;
+    return rewriteKnownDirectHostUrl(uri) ?? trimmed;
   }
 
   static bool isPrivateOrLoopbackHost(String hostname) {

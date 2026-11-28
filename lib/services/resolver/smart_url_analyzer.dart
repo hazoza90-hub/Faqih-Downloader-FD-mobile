@@ -2,6 +2,7 @@ import '../../app/vault_storage_actions.dart';
 import '../../core/utils/url_detector.dart';
 import '../media/media_exceptions.dart';
 import '../media/media_extractor_service.dart';
+import 'html_candidate_parser.dart';
 import 'html_download_resolver.dart';
 
 /// Analyzes an arbitrary URL via media regex fast-path, HTML/APK resolver, and yt-dlp fallback.
@@ -30,14 +31,15 @@ class SmartUrlAnalyzer {
       return UrlAnalysisResult(url: url, mediaInfo: info);
     }
 
-    if (UrlDetector.isDirectDownloadUrl(url)) {
-      return UrlAnalysisResult(url: url);
+    final effectiveUrl = HtmlCandidateParser.normalizeDirectUrl(url);
+    if (UrlDetector.isDirectDownloadUrl(effectiveUrl)) {
+      return UrlAnalysisResult(url: effectiveUrl);
     }
 
     ResolvedDownloadResult? resolved;
     Object? resolverError;
     try {
-      resolved = await _htmlResolver.resolve(url);
+      resolved = await _htmlResolver.resolve(effectiveUrl);
       if (!resolved.isHtmlLanding) {
         return UrlAnalysisResult(
           url: resolved.url,

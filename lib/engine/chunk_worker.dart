@@ -237,6 +237,7 @@ class ChunkWorker {
 
     void resetStallTimer() {
       stallTimer?.cancel();
+      if (done.isCompleted || isPaused() || isCancelled()) return;
       stallTimer = Timer(stallTimeout, () {
         if (done.isCompleted || isPaused() || isCancelled()) return;
         abort(TimeoutException('Chunk stream stalled', stallTimeout));
